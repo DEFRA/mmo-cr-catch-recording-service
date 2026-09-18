@@ -1,7 +1,7 @@
 {
-  "name": "cdp-node-backend-template",
-  "version": "0.1.0",
-  "description": "CDP Node.js Backend Template",
+  "name": "mmo-cr-catch-recording-service",
+  "version": "0.0.0",
+  "description": "mmo-cr-catch-recording-service",
   "main": "src/index.js",
   "type": "module",
   "engines": {
