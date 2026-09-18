@@ -1,0 +1,173 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://defra/fetch-jira-workitem/output-schema.json",
+  "title": "fetch-jira-workitem agent output",
+  "description": "Sanitised, PII-free work-item contract returned to the agent. Unknown fields are never emitted.",
+  "oneOf": [
+    { "$ref": "#/$defs/workItem" },
+    { "$ref": "#/$defs/workItemSet" },
+    { "$ref": "#/$defs/hierarchyIndex" }
+  ],
+  "$defs": {
+    "reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key"],
+      "properties": {
+        "key": { "type": "string", "pattern": "^[A-Z][A-Z0-9]+-\\d+$" },
+        "type": { "type": ["string", "null"] },
+        "direction": { "enum": ["inward", "outward"] }
+      }
+    },
+    "attachment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "safeFilename", "mimeType"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^\\d+$" },
+        "safeFilename": { "type": "string" },
+        "mimeType": { "type": "string" },
+        "size": { "type": ["integer", "null"] },
+        "isDesignAsset": { "type": "boolean" }
+      }
+    },
+    "designUrl": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url"],
+      "properties": {
+        "url": { "type": "string", "format": "uri" },
+        "source": { "type": "string" }
+      }
+    },
+    "workItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "ticketKey", "sourceJiraUrl", "provenance"],
+      "properties": {
+        "schemaVersion": { "type": "string" },
+        "kind": { "const": "work-item" },
+        "ticketKey": { "type": "string", "pattern": "^[A-Z][A-Z0-9]+-\\d+$" },
+        "ticketType": { "type": ["string", "null"] },
+        "summary": { "type": ["string", "null"] },
+        "description": { "type": ["string", "null"] },
+        "acceptanceCriteria": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "status": { "type": ["string", "null"] },
+        "priority": { "type": ["string", "null"] },
+        "parent": {
+          "oneOf": [{ "$ref": "#/$defs/reference" }, { "type": "null" }]
+        },
+        "children": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/reference" }
+        },
+        "links": { "type": "array", "items": { "$ref": "#/$defs/reference" } },
+        "attachments": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/attachment" }
+        },
+        "designUrls": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/designUrl" }
+        },
+        "labels": { "type": "array", "items": { "type": "string" } },
+        "sourceJiraUrl": { "type": "string", "format": "uri" },
+        "provenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["retrievedAt", "sanitiserVersion", "contentHash"],
+          "properties": {
+            "retrievedAt": { "type": "string" },
+            "jiraUpdated": { "type": ["string", "null"] },
+            "sanitiserVersion": { "type": "string" },
+            "contentHash": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            }
+          }
+        },
+        "truncated": { "type": "boolean" },
+        "sanitisationWarnings": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "error": { "type": ["string", "null"] },
+        "notes": { "type": ["string", "null"] },
+        "relation": { "type": "string" },
+        "depth": { "type": "integer" }
+      }
+    },
+    "errorItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ticketKey", "error"],
+      "properties": {
+        "ticketKey": { "type": "string", "pattern": "^[A-Z][A-Z0-9]+-\\d+$" },
+        "error": { "type": ["string", "null"] },
+        "notes": { "type": ["string", "null"] }
+      }
+    },
+    "workItemSet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "kind", "root", "items"],
+      "properties": {
+        "schemaVersion": { "type": "string" },
+        "kind": { "const": "work-item-set" },
+        "root": { "type": "string", "pattern": "^[A-Z][A-Z0-9]+-\\d+$" },
+        "retrievedAt": { "type": "string" },
+        "count": { "type": "integer" },
+        "truncated": { "type": "boolean" },
+        "warnings": { "type": "array", "items": { "type": "string" } },
+        "items": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              { "$ref": "#/$defs/workItem" },
+              { "$ref": "#/$defs/errorItem" }
+            ]
+          }
+        }
+      }
+    },
+    "hierarchyIndex": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "kind", "root", "index"],
+      "properties": {
+        "schemaVersion": { "type": "string" },
+        "kind": { "const": "hierarchy-index" },
+        "root": { "type": "string", "pattern": "^[A-Z][A-Z0-9]+-\\d+$" },
+        "retrievedAt": { "type": "string" },
+        "count": { "type": "integer" },
+        "truncated": { "type": "boolean" },
+        "warnings": { "type": "array", "items": { "type": "string" } },
+        "index": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key"],
+            "properties": {
+              "key": { "type": "string", "pattern": "^[A-Z][A-Z0-9]+-\\d+$" },
+              "ticketType": { "type": ["string", "null"] },
+              "summary": { "type": ["string", "null"] },
+              "status": { "type": ["string", "null"] },
+              "depth": { "type": "integer" },
+              "relation": { "type": "string" },
+              "notes": { "type": ["string", "null"] },
+              "error": { "type": ["string", "null"] },
+              "parentKey": { "type": ["string", "null"] },
+              "linkKeys": { "type": "array", "items": { "type": "string" } },
+              "attachmentCount": { "type": "integer" },
+              "designUrlCount": { "type": "integer" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

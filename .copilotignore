@@ -1,0 +1,65 @@
+# .copilotignore
+#
+# Prevents AI coding assistants (GitHub Copilot and compatible agents/extensions
+# that honour this file) from reading sensitive files as context.
+#
+# Syntax: .gitignore-style glob patterns, one per line; "#" starts a comment.
+#
+# NOTE ON ENFORCEMENT
+# This file is honoured by tools that support the community `.copilotignore`
+# convention. GitHub Copilot's *authoritative* protection is "content exclusion",
+# configured in repository/organisation settings on GitHub — configure the same
+# patterns there as well:
+# https://docs.github.com/en/copilot/how-tos/configure-content-exclusion/exclude-content-from-copilot
+# Keep this list and the content-exclusion settings in sync. Never rely on this
+# file alone to protect a real secret — secrets must not be committed at all
+# (see DEFRA credential-exposure process).
+
+# --- Environment & local config (may contain secrets) ---
+.env
+.env.*
+*.env
+!*.example.env
+!.env.example
+.envrc
+compose/*.env
+
+# --- Secrets, credentials & tokens ---
+**/secret*
+**/*secret*
+**/*secrets*
+secrets.json
+credentials
+credentials.*
+**/credentials/**
+.npmrc
+.netrc
+.pgpass
+
+# --- Keys & certificates ---
+*.pem
+*.key
+*.crt
+*.cer
+*.der
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.truststore
+id_rsa*
+id_ed25519*
+*.gpg
+*.asc
+*.ppk
+
+# --- Cloud / infrastructure credentials & state ---
+.aws/**
+**/aws.env
+*.tfstate
+*.tfstate.*
+*.tfvars
+
+# --- Session / auth material ---
+*.cookie
+session-secret*

@@ -1,0 +1,15 @@
+# Paths excluded from Copilot analytics line counting.
+#
+# Syntax: one gitignore-style pattern per line; '#' starts a comment; blank
+# lines are ignored. Each entry is applied as a git ':(exclude)' pathspec when
+# commit line volume is measured.
+#
+# These patterns ADD to the collector's built-in exclusions for generated and
+# vendored files (lockfiles, *.min.*, *.map, *.snap) — they do not replace them.
+#
+# Only deliverable code should count toward line-volume metrics. Documentation
+# and design artefacts are excluded so they cannot inflate the rate; commits
+# touching them still count toward the commit-based rate.
+
+docs/
+design/

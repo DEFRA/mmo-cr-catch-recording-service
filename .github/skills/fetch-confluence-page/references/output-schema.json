@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://defra/fetch-confluence-page/output-schema.json",
+  "title": "fetch-confluence-page agent output",
+  "description": "Sanitised, PII-free Confluence page contract returned to the agent. Unknown fields are never emitted.",
+  "oneOf": [
+    { "$ref": "#/$defs/confluencePage" },
+    { "$ref": "#/$defs/errorPage" }
+  ],
+  "$defs": {
+    "attachment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "safeFilename", "mediaType"],
+      "properties": {
+        "id": { "type": "string" },
+        "safeFilename": { "type": "string" },
+        "mediaType": { "type": "string" },
+        "size": { "type": ["integer", "null"] },
+        "isDesignAsset": { "type": "boolean" }
+      }
+    },
+    "confluencePage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "pageId",
+        "sourceConfluenceUrl",
+        "provenance"
+      ],
+      "properties": {
+        "schemaVersion": { "type": "string" },
+        "kind": { "const": "confluence-page" },
+        "pageId": { "type": "string", "pattern": "^\\d+$" },
+        "title": { "type": ["string", "null"] },
+        "status": { "type": ["string", "null"] },
+        "spaceId": { "type": ["string", "null"], "pattern": "^\\d+$" },
+        "parentId": { "type": ["string", "null"], "pattern": "^\\d+$" },
+        "body": { "type": ["string", "null"] },
+        "labels": { "type": "array", "items": { "type": "string" } },
+        "attachments": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/attachment" }
+        },
+        "sourceConfluenceUrl": { "type": "string", "format": "uri" },
+        "provenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["retrievedAt", "sanitiserVersion", "contentHash"],
+          "properties": {
+            "retrievedAt": { "type": "string" },
+            "confluenceVersion": { "type": ["integer", "null"] },
+            "confluenceUpdated": { "type": ["string", "null"] },
+            "sanitiserVersion": { "type": "string" },
+            "contentHash": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            }
+          }
+        },
+        "truncated": { "type": "boolean" },
+        "sanitisationWarnings": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "error": { "type": ["string", "null"] },
+        "notes": { "type": ["string", "null"] }
+      }
+    },
+    "errorPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "kind", "pageId", "error"],
+      "properties": {
+        "schemaVersion": { "type": "string" },
+        "kind": { "const": "confluence-page" },
+        "pageId": { "type": "string", "pattern": "^\\d+$" },
+        "error": { "type": ["string", "null"] }
+      }
+    }
+  }
+}
