@@ -9,6 +9,7 @@ import { mongoDb } from '#/plugins/mongodb.js'
 import { failAction } from '#/common/helpers/fail-action.js'
 import { pulse } from '#/plugins/pulse.js'
 import { requestTracing } from '#/plugins/request-tracing.js'
+import { errorMapping } from '#/plugins/error-mapping.js'
 import { metrics } from '@defra/cdp-metrics'
 
 export async function createServer() {
@@ -44,6 +45,7 @@ export async function createServer() {
   // secureContext  - loads CA certificates from environment config
   // pulse          - provides shutdown handlers
   // mongoDb        - sets up mongo connection pool and attaches to `server` and `request` objects
+  // errorMapping   - maps application/Boom/validation errors to the safe public HTTP error contract
   // router         - routes used in the app
   await server.register([
     requestLogger,
@@ -55,6 +57,7 @@ export async function createServer() {
       plugin: mongoDb,
       options: config.get('mongo')
     },
+    errorMapping,
     router
   ])
 

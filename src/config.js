@@ -2,8 +2,11 @@ import convict from 'convict'
 import convictFormatWithValidator from 'convict-format-with-validator'
 
 import { convictValidateMongoUri } from '#/common/helpers/convict/validate-mongo-uri.js'
+import { convictValidateMongoCollectionName } from '#/common/helpers/convict/validate-mongo-collection-name.js'
+import { assertUniqueCollectionNames } from '#/common/helpers/convict/assert-unique-collection-names.js'
 
 convict.addFormat(convictValidateMongoUri)
+convict.addFormat(convictValidateMongoCollectionName)
 convict.addFormats(convictFormatWithValidator)
 
 const isProduction = process.env.NODE_ENV === 'production'
@@ -126,7 +129,75 @@ export const config = convict({
       default: 'x-cdp-request-id',
       env: 'TRACING_HEADER'
     }
+  },
+  catchRecording: {
+    persistence: {
+      collections: {
+        catchRecords: {
+          doc: 'MongoDB collection name for persisted catch records (future persistence-adapter step)',
+          format: 'mongo-collection-name',
+          default: 'catchRecords',
+          env: 'CATCH_RECORDING_COLLECTION_CATCH_RECORDS'
+        },
+        catchRecordHistory: {
+          doc: 'MongoDB collection name for catch-record history/audit events (future persistence-adapter step)',
+          format: 'mongo-collection-name',
+          default: 'catchRecordHistory',
+          env: 'CATCH_RECORDING_COLLECTION_CATCH_RECORD_HISTORY'
+        },
+        idempotencyRecords: {
+          doc: 'MongoDB collection name for idempotency records (future persistence-adapter step)',
+          format: 'mongo-collection-name',
+          default: 'idempotencyRecords',
+          env: 'CATCH_RECORDING_COLLECTION_IDEMPOTENCY_RECORDS'
+        },
+        submissionOperations: {
+          doc: 'MongoDB collection name for submission-operation state (future persistence-adapter step)',
+          format: 'mongo-collection-name',
+          default: 'submissionOperations',
+          env: 'CATCH_RECORDING_COLLECTION_SUBMISSION_OPERATIONS'
+        },
+        vesselGearFavourites: {
+          doc: 'MongoDB collection name for vessel gear favourites (future persistence-adapter step)',
+          format: 'mongo-collection-name',
+          default: 'vesselGearFavourites',
+          env: 'CATCH_RECORDING_COLLECTION_VESSEL_GEAR_FAVOURITES'
+        },
+        vesselSpeciesFavourites: {
+          doc: 'MongoDB collection name for vessel species favourites (future persistence-adapter step)',
+          format: 'mongo-collection-name',
+          default: 'vesselSpeciesFavourites',
+          env: 'CATCH_RECORDING_COLLECTION_VESSEL_SPECIES_FAVOURITES'
+        },
+        vesselPortFavourites: {
+          doc: 'MongoDB collection name for vessel port favourites (future persistence-adapter step)',
+          format: 'mongo-collection-name',
+          default: 'vesselPortFavourites',
+          env: 'CATCH_RECORDING_COLLECTION_VESSEL_PORT_FAVOURITES'
+        },
+        skippers: {
+          doc: 'MongoDB collection name for skippers (future persistence-adapter step)',
+          format: 'mongo-collection-name',
+          default: 'skippers',
+          env: 'CATCH_RECORDING_COLLECTION_SKIPPERS'
+        },
+        skipperVesselAssociations: {
+          doc: 'MongoDB collection name for skipper-to-vessel associations (future persistence-adapter step)',
+          format: 'mongo-collection-name',
+          default: 'skipperVesselAssociations',
+          env: 'CATCH_RECORDING_COLLECTION_SKIPPER_VESSEL_ASSOCIATIONS'
+        }
+      }
+    }
   }
 })
 
 config.validate({ allowed: 'strict' })
+
+// Convict's per-field format validation cannot see sibling values, so collection-name uniqueness is
+// enforced explicitly here, immediately after strict validation. This remains a deterministic startup
+// failure (a plain Error) — never an ApplicationError, Boom error, or HTTP response (see
+// design/architecture/catch-recording-configuration-contracts.md §14).
+assertUniqueCollectionNames(
+  config.get('catchRecording.persistence.collections')
+)
