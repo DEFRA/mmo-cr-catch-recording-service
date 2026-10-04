@@ -4,6 +4,12 @@ import { fileURLToPath } from 'node:url'
 
 import { router } from '#/plugins/router.js'
 
+import {
+  canAbandonDraft,
+  calculateNextSubmissionNumber
+} from './catch-record-lifecycle-eligibility.js'
+import { evaluateLifecycleInvariant } from './catch-record-lifecycle-invariants.js'
+import { deriveDisplayStatus } from './catch-record-lifecycle-status.js'
 import { createCatchRecordingModule } from './catch-recording-composition.js'
 
 const EXPECTED_COMPONENT_NAMES = {
@@ -138,5 +144,24 @@ describe('Existing route registration', () => {
     expect(paths.some((path) => path.toLowerCase().includes('catch'))).toBe(
       false
     )
+  })
+})
+
+describe('Step 08 lifecycle module composition compatibility', () => {
+  test('Should import Step 08 lifecycle modules without initialising any infrastructure', () => {
+    expect(typeof canAbandonDraft).toBe('function')
+    expect(typeof calculateNextSubmissionNumber).toBe('function')
+    expect(typeof evaluateLifecycleInvariant).toBe('function')
+    expect(typeof deriveDisplayStatus).toBe('function')
+  })
+
+  test('Should leave createCatchRecordingModule entirely unaffected by Step 08', () => {
+    const module = createCatchRecordingModule()
+
+    for (const [key, expectedName] of Object.entries(
+      EXPECTED_COMPONENT_NAMES
+    )) {
+      expect(module[key].name).toBe(expectedName)
+    }
   })
 })
