@@ -2,7 +2,10 @@ import convict from 'convict'
 import convictFormatWithValidator from 'convict-format-with-validator'
 
 import { convictValidateMongoUri } from '#/common/helpers/convict/validate-mongo-uri.js'
-import { convictValidateMongoCollectionName } from '#/common/helpers/convict/validate-mongo-collection-name.js'
+import {
+  MONGO_COLLECTION_NAME_FORMAT,
+  convictValidateMongoCollectionName
+} from '#/common/helpers/convict/validate-mongo-collection-name.js'
 import { assertUniqueCollectionNames } from '#/common/helpers/convict/assert-unique-collection-names.js'
 
 convict.addFormat(convictValidateMongoUri)
@@ -135,55 +138,55 @@ export const config = convict({
       collections: {
         catchRecords: {
           doc: 'MongoDB collection name for persisted catch records (future persistence-adapter step)',
-          format: 'mongo-collection-name',
+          format: MONGO_COLLECTION_NAME_FORMAT,
           default: 'catchRecords',
           env: 'CATCH_RECORDING_COLLECTION_CATCH_RECORDS'
         },
         catchRecordHistory: {
           doc: 'MongoDB collection name for catch-record history/audit events (future persistence-adapter step)',
-          format: 'mongo-collection-name',
+          format: MONGO_COLLECTION_NAME_FORMAT,
           default: 'catchRecordHistory',
           env: 'CATCH_RECORDING_COLLECTION_CATCH_RECORD_HISTORY'
         },
         idempotencyRecords: {
           doc: 'MongoDB collection name for idempotency records (future persistence-adapter step)',
-          format: 'mongo-collection-name',
+          format: MONGO_COLLECTION_NAME_FORMAT,
           default: 'idempotencyRecords',
           env: 'CATCH_RECORDING_COLLECTION_IDEMPOTENCY_RECORDS'
         },
         submissionOperations: {
           doc: 'MongoDB collection name for submission-operation state (future persistence-adapter step)',
-          format: 'mongo-collection-name',
+          format: MONGO_COLLECTION_NAME_FORMAT,
           default: 'submissionOperations',
           env: 'CATCH_RECORDING_COLLECTION_SUBMISSION_OPERATIONS'
         },
         vesselGearFavourites: {
           doc: 'MongoDB collection name for vessel gear favourites (future persistence-adapter step)',
-          format: 'mongo-collection-name',
+          format: MONGO_COLLECTION_NAME_FORMAT,
           default: 'vesselGearFavourites',
           env: 'CATCH_RECORDING_COLLECTION_VESSEL_GEAR_FAVOURITES'
         },
         vesselSpeciesFavourites: {
           doc: 'MongoDB collection name for vessel species favourites (future persistence-adapter step)',
-          format: 'mongo-collection-name',
+          format: MONGO_COLLECTION_NAME_FORMAT,
           default: 'vesselSpeciesFavourites',
           env: 'CATCH_RECORDING_COLLECTION_VESSEL_SPECIES_FAVOURITES'
         },
         vesselPortFavourites: {
           doc: 'MongoDB collection name for vessel port favourites (future persistence-adapter step)',
-          format: 'mongo-collection-name',
+          format: MONGO_COLLECTION_NAME_FORMAT,
           default: 'vesselPortFavourites',
           env: 'CATCH_RECORDING_COLLECTION_VESSEL_PORT_FAVOURITES'
         },
         skippers: {
           doc: 'MongoDB collection name for skippers (future persistence-adapter step)',
-          format: 'mongo-collection-name',
+          format: MONGO_COLLECTION_NAME_FORMAT,
           default: 'skippers',
           env: 'CATCH_RECORDING_COLLECTION_SKIPPERS'
         },
         skipperVesselAssociations: {
           doc: 'MongoDB collection name for skipper-to-vessel associations (future persistence-adapter step)',
-          format: 'mongo-collection-name',
+          format: MONGO_COLLECTION_NAME_FORMAT,
           default: 'skipperVesselAssociations',
           env: 'CATCH_RECORDING_COLLECTION_SKIPPER_VESSEL_ASSOCIATIONS'
         }

@@ -65,7 +65,8 @@ function mapApplicationError(error, correlationId) {
 }
 
 function mapValidationError(error, correlationId) {
-  const statusCode = error.output?.statusCode ?? 400
+  const statusCode =
+    error.output?.statusCode ?? CATEGORY_HTTP_STATUS.INVALID_REQUEST
   const safeDetails = buildSafeDetails(
     error.details.map((detail) => ({
       path: Array.isArray(detail.path)

@@ -14,8 +14,10 @@ const collectionNameSchema = Joi.string()
     return value
   }, 'reject reserved MongoDB system. prefix')
 
+export const MONGO_COLLECTION_NAME_FORMAT = 'mongo-collection-name'
+
 export const convictValidateMongoCollectionName = {
-  name: 'mongo-collection-name',
+  name: MONGO_COLLECTION_NAME_FORMAT,
   validate: function validateMongoCollectionName(value) {
     Joi.assert(value, collectionNameSchema, 'Invalid MongoDB collection name')
   }
