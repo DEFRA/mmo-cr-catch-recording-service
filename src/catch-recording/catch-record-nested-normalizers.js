@@ -1,7 +1,4 @@
-import {
-  assertAllowedKeys,
-  assertNoServerOwnedFields
-} from './catch-record-normalization-support.js'
+import { assertAllowedKeys } from './catch-record-normalization-support.js'
 import {
   normalizeBoolean,
   normalizeCalendarDate,
@@ -222,4 +219,4 @@ export const CATCH_RECORD_NESTED_FIELD_ALLOW_LISTS = Object.freeze({
 
 // Re-exported so section normalisers (Phase D) can reuse the same server-owned-field guard without a
 // second import path.
-export { assertNoServerOwnedFields }
+export { assertNoServerOwnedFields } from './catch-record-normalization-support.js'

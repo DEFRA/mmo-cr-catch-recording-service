@@ -21,6 +21,9 @@ function isNonNegativeInteger(value) {
   return Number.isInteger(value) && value >= 0
 }
 
+const DISPLAY_STATUS_DERIVED_REASON =
+  'The display status was derived successfully.'
+
 export function deriveDisplayStatus({ status, numberOfSubmissions }) {
   if (
     status !== CATCH_RECORD_STATUS.DRAFT &&
@@ -44,7 +47,7 @@ export function deriveDisplayStatus({ status, numberOfSubmissions }) {
   if (status === CATCH_RECORD_STATUS.SUBMITTED) {
     return createAllowedDecision(
       'LIFECYCLE_OPERATION_ALLOWED',
-      'The display status was derived successfully.',
+      DISPLAY_STATUS_DERIVED_REASON,
       { displayStatus: CATCH_RECORD_DISPLAY_STATUS.SUBMITTED }
     )
   }
@@ -52,7 +55,7 @@ export function deriveDisplayStatus({ status, numberOfSubmissions }) {
   if (status === CATCH_RECORD_STATUS.COMPLETE) {
     return createAllowedDecision(
       'LIFECYCLE_OPERATION_ALLOWED',
-      'The display status was derived successfully.',
+      DISPLAY_STATUS_DERIVED_REASON,
       { displayStatus: CATCH_RECORD_DISPLAY_STATUS.COMPLETE }
     )
   }
@@ -64,7 +67,9 @@ export function deriveDisplayStatus({ status, numberOfSubmissions }) {
 
   return createAllowedDecision(
     'LIFECYCLE_OPERATION_ALLOWED',
-    'The display status was derived successfully.',
-    { displayStatus }
+    DISPLAY_STATUS_DERIVED_REASON,
+    {
+      displayStatus
+    }
   )
 }

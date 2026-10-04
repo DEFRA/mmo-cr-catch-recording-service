@@ -6,6 +6,10 @@
 // vessel data. Fixtures are test-support data only; they are never imported by runtime application code
 // (see canonical-catch-record-contract.test.js's companion architecture-boundary test in
 // catch-recording-composition.test.js, which scans every non-test file in this directory).
+const FIXTURE_OWNER_ID = 'fixture-owner-1'
+const FIXTURE_CREATED_AT = '2026-01-01T09:00:00.000Z'
+const FIXTURE_SUBMITTED_AT = '2026-01-02T09:00:00.000Z'
+
 function buildSpeciesAttribute(overrides = {}) {
   return {
     attributeId: 'fixture-attribute-1',
@@ -48,13 +52,89 @@ function buildGear(overrides = {}) {
   }
 }
 
+function buildVesselSnapshot() {
+  return {
+    id: 'fixture-vessel-1',
+    nameSnapshot: 'Fixture Vessel',
+    registrationSnapshot: 'FIX-REG-1',
+    externalMarkSnapshot: 'FIX-EM-1',
+    lengthOverallMetres: 12.5
+  }
+}
+
+function buildPortSnapshot() {
+  return {
+    id: 'fixture-port-1',
+    codeSnapshot: 'GBPLY',
+    nameSnapshot: 'Fixture Plymouth'
+  }
+}
+
+function buildTrip() {
+  return {
+    startedAndFinishedToday: true,
+    dateStarted: '2026-01-01',
+    dateEnded: '2026-01-01',
+    departurePort: buildPortSnapshot(),
+    returnPort: buildPortSnapshot()
+  }
+}
+
+function buildPairFishing() {
+  return {
+    enabled: false,
+    pairSkipperFullName: null,
+    pairVesselRssNumber: null
+  }
+}
+
+function buildAuditEditEvent() {
+  return {
+    dateEdited: '2026-01-03T09:00:00.000Z',
+    fishermanId: FIXTURE_OWNER_ID,
+    previousStatus: 'SUBMITTED',
+    reason: 'Fixture amendment reason'
+  }
+}
+
+function buildArtifact() {
+  return {
+    submissionNumber: 1,
+    jsonSnapshotS3Key: 'fixtures/fixture-record-1/1.json',
+    pdfReceiptS3Key: 'fixtures/fixture-record-1/1.pdf',
+    submittedAt: FIXTURE_SUBMITTED_AT,
+    submittedBy: FIXTURE_OWNER_ID
+  }
+}
+
+function buildSecondGear() {
+  return buildGear({
+    gearId: 'fixture-gear-2',
+    associationId: 'fixture-association-2',
+    codeSnapshot: 'OT',
+    nameSnapshot: 'Fixture Otter trawl',
+    statisticalArea: {
+      id: 'fixture-area-2',
+      code: '28',
+      nameSnapshot: 'Fixture Area 28'
+    },
+    speciesCaught: [
+      buildSpeciesCaught({
+        attributes: [
+          buildSpeciesAttribute({ attributeId: 'fixture-attribute-2' })
+        ]
+      })
+    ]
+  })
+}
+
 // Minimal incomplete draft: an unstarted gear journey, with vessel/trip/pairFishing/retainedCatch not yet
 // selected. Deliberately does not satisfy any future complete-record (Step 07) rule.
 export function createDraftCatchRecordFixture(overrides = {}) {
   return {
     id: null,
     catchRecordReference: null,
-    ownerUserId: 'fixture-owner-1',
+    ownerUserId: FIXTURE_OWNER_ID,
     status: 'DRAFT',
     version: 1,
     numberOfSubmissions: 0,
@@ -66,10 +146,10 @@ export function createDraftCatchRecordFixture(overrides = {}) {
     retainedCatch: null,
     audit: { editEvents: [] },
     artifacts: [],
-    createdAt: '2026-01-01T09:00:00.000Z',
-    createdBy: 'fixture-owner-1',
-    updatedAt: '2026-01-01T09:00:00.000Z',
-    updatedBy: 'fixture-owner-1',
+    createdAt: FIXTURE_CREATED_AT,
+    createdBy: FIXTURE_OWNER_ID,
+    updatedAt: FIXTURE_CREATED_AT,
+    updatedBy: FIXTURE_OWNER_ID,
     submittedAt: null,
     submittedBy: null,
     completedAt: null,
@@ -86,85 +166,24 @@ export function createSubmittedCatchRecordFixture(overrides = {}) {
   return {
     id: 'fixture-record-1',
     catchRecordReference: 'GBR-B14974-011026-095421',
-    ownerUserId: 'fixture-owner-1',
+    ownerUserId: FIXTURE_OWNER_ID,
     status: 'SUBMITTED',
     version: 2,
     numberOfSubmissions: 1,
     hasUnsubmittedChanges: false,
-    vessel: {
-      id: 'fixture-vessel-1',
-      nameSnapshot: 'Fixture Vessel',
-      registrationSnapshot: 'FIX-REG-1',
-      externalMarkSnapshot: 'FIX-EM-1',
-      lengthOverallMetres: 12.5
-    },
-    trip: {
-      startedAndFinishedToday: true,
-      dateStarted: '2026-01-01',
-      dateEnded: '2026-01-01',
-      departurePort: {
-        id: 'fixture-port-1',
-        codeSnapshot: 'GBPLY',
-        nameSnapshot: 'Fixture Plymouth'
-      },
-      returnPort: {
-        id: 'fixture-port-1',
-        codeSnapshot: 'GBPLY',
-        nameSnapshot: 'Fixture Plymouth'
-      }
-    },
-    pairFishing: {
-      enabled: false,
-      pairSkipperFullName: null,
-      pairVesselRssNumber: null
-    },
-    gear: [
-      buildGear(),
-      buildGear({
-        gearId: 'fixture-gear-2',
-        associationId: 'fixture-association-2',
-        codeSnapshot: 'OT',
-        nameSnapshot: 'Fixture Otter trawl',
-        statisticalArea: {
-          id: 'fixture-area-2',
-          code: '28',
-          nameSnapshot: 'Fixture Area 28'
-        },
-        speciesCaught: [
-          buildSpeciesCaught({
-            attributes: [
-              buildSpeciesAttribute({ attributeId: 'fixture-attribute-2' })
-            ]
-          })
-        ]
-      })
-    ],
+    vessel: buildVesselSnapshot(),
+    trip: buildTrip(),
+    pairFishing: buildPairFishing(),
+    gear: [buildGear(), buildSecondGear()],
     retainedCatch: { answer: 'YES', species: [] },
-    audit: {
-      editEvents: [
-        {
-          dateEdited: '2026-01-03T09:00:00.000Z',
-          fishermanId: 'fixture-owner-1',
-          previousStatus: 'SUBMITTED',
-          reason: 'Fixture amendment reason'
-        }
-      ]
-    },
-    artifacts: [
-      {
-        submissionNumber: 1,
-        jsonSnapshotS3Key: 'fixtures/fixture-record-1/1.json',
-        pdfReceiptS3Key: 'fixtures/fixture-record-1/1.pdf',
-        submittedAt: '2026-01-02T09:00:00.000Z',
-        submittedBy: 'fixture-owner-1'
-      }
-    ],
-    createdAt: '2026-01-01T09:00:00.000Z',
-    createdBy: 'fixture-owner-1',
-    updatedAt: '2026-01-02T09:00:00.000Z',
-    updatedBy: 'fixture-owner-1',
-    submittedAt: '2026-01-02T09:00:00.000Z',
-    submittedBy: 'fixture-owner-1',
+    audit: { editEvents: [buildAuditEditEvent()] },
+    artifacts: [buildArtifact()],
+    createdAt: FIXTURE_CREATED_AT,
+    createdBy: FIXTURE_OWNER_ID,
+    updatedAt: FIXTURE_SUBMITTED_AT,
+    updatedBy: FIXTURE_OWNER_ID,
+    submittedAt: FIXTURE_SUBMITTED_AT,
+    submittedBy: FIXTURE_OWNER_ID,
     completedAt: null,
     completedBy: null,
     ...overrides

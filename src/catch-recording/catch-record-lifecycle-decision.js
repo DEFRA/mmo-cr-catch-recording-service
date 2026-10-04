@@ -29,11 +29,7 @@ function assertCode(code) {
   }
 }
 
-export function createAllowedDecision(
-  code = 'LIFECYCLE_OPERATION_ALLOWED',
-  reason,
-  details
-) {
+export function createAllowedDecision(code, reason, details) {
   assertCode(code)
 
   const decision = { allowed: true, code, reason }

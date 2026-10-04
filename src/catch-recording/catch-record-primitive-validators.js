@@ -10,6 +10,7 @@ import { createValidationError } from './catch-record-validation-result.js'
 const CALENDAR_DATE_PATTERN = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/
 const DATE_TIME_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/
+const REQUIRED_FIELD_MESSAGE = 'A value is required.'
 
 function isPresent(value) {
   return value !== null && value !== undefined
@@ -22,7 +23,7 @@ export function validateRequiredString(
 ) {
   if (!isPresent(value)) {
     return [
-      createValidationError('REQUIRED_FIELD', path, 'A value is required.')
+      createValidationError('REQUIRED_FIELD', path, REQUIRED_FIELD_MESSAGE)
     ]
   }
 
@@ -93,7 +94,7 @@ export function validateIdentifier(value, path, options = {}) {
 export function validateBoolean(value, path, { required = false } = {}) {
   if (!isPresent(value)) {
     return required
-      ? [createValidationError('REQUIRED_FIELD', path, 'A value is required.')]
+      ? [createValidationError('REQUIRED_FIELD', path, REQUIRED_FIELD_MESSAGE)]
       : []
   }
 
@@ -118,7 +119,7 @@ export function validateEnum(
 ) {
   if (!isPresent(value)) {
     return required
-      ? [createValidationError('REQUIRED_FIELD', path, 'A value is required.')]
+      ? [createValidationError('REQUIRED_FIELD', path, REQUIRED_FIELD_MESSAGE)]
       : []
   }
 
@@ -139,7 +140,7 @@ export function validateEnum(
 export function validateCalendarDate(value, path, { required = false } = {}) {
   if (!isPresent(value)) {
     return required
-      ? [createValidationError('REQUIRED_FIELD', path, 'A value is required.')]
+      ? [createValidationError('REQUIRED_FIELD', path, REQUIRED_FIELD_MESSAGE)]
       : []
   }
 
@@ -162,7 +163,7 @@ export function validateCalendarDate(value, path, { required = false } = {}) {
 export function validateDateTime(value, path, { required = false } = {}) {
   if (!isPresent(value)) {
     return required
-      ? [createValidationError('REQUIRED_FIELD', path, 'A value is required.')]
+      ? [createValidationError('REQUIRED_FIELD', path, REQUIRED_FIELD_MESSAGE)]
       : []
   }
 
@@ -187,7 +188,7 @@ export function validateNumber(
 ) {
   if (!isPresent(value)) {
     return required
-      ? [createValidationError('REQUIRED_FIELD', path, 'A value is required.')]
+      ? [createValidationError('REQUIRED_FIELD', path, REQUIRED_FIELD_MESSAGE)]
       : []
   }
 

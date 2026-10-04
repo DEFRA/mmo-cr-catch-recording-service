@@ -156,6 +156,75 @@ export function validateTripSection(trip, path = 'trip') {
   return createValidationResult(errors)
 }
 
+// Extracted from validatePairFishingSection to keep that function's cyclomatic and cognitive complexity
+// within the approved limits: the "enabled" and "disabled" conditional-detail rules are independent,
+// mutually exclusive branches, so each is clearer and simpler to verify as its own small function.
+function validatePairFishingEnabledDetails(pairFishing, nameField, rssField) {
+  const errors = []
+
+  if (!pairFishing.pairSkipperFullName) {
+    errors.push(
+      createValidationError(
+        'CONDITIONAL_FIELD_REQUIRED',
+        nameField,
+        'A pair skipper name is required when pair fishing is enabled.'
+      )
+    )
+  } else {
+    errors.push(
+      ...validateRequiredString(pairFishing.pairSkipperFullName, nameField)
+    )
+  }
+
+  if (!pairFishing.pairVesselRssNumber) {
+    errors.push(
+      createValidationError(
+        'CONDITIONAL_FIELD_REQUIRED',
+        rssField,
+        'A pair vessel RSS number is required when pair fishing is enabled.'
+      )
+    )
+  } else {
+    errors.push(
+      ...validateIdentifier(pairFishing.pairVesselRssNumber, rssField)
+    )
+  }
+
+  return errors
+}
+
+function validatePairFishingDisabledDetails(pairFishing, nameField, rssField) {
+  const errors = []
+
+  if (
+    pairFishing.pairSkipperFullName !== null &&
+    pairFishing.pairSkipperFullName !== undefined
+  ) {
+    errors.push(
+      createValidationError(
+        'CONDITIONAL_FIELD_PROHIBITED',
+        nameField,
+        'A pair skipper name must not be supplied when pair fishing is disabled.'
+      )
+    )
+  }
+
+  if (
+    pairFishing.pairVesselRssNumber !== null &&
+    pairFishing.pairVesselRssNumber !== undefined
+  ) {
+    errors.push(
+      createValidationError(
+        'CONDITIONAL_FIELD_PROHIBITED',
+        rssField,
+        'A pair vessel RSS number must not be supplied when pair fishing is disabled.'
+      )
+    )
+  }
+
+  return errors
+}
+
 export function validatePairFishingSection(pairFishing, path = 'pairFishing') {
   if (!isPlainObjectOrNull(pairFishing)) {
     return typeMismatchResult(path)
@@ -172,59 +241,16 @@ export function validatePairFishingSection(pairFishing, path = 'pairFishing') {
   const rssField = joinPath(path, 'pairVesselRssNumber')
 
   if (pairFishing.enabled === true) {
-    if (!pairFishing.pairSkipperFullName) {
-      errors.push(
-        createValidationError(
-          'CONDITIONAL_FIELD_REQUIRED',
-          nameField,
-          'A pair skipper name is required when pair fishing is enabled.'
-        )
-      )
-    } else {
-      errors.push(
-        ...validateRequiredString(pairFishing.pairSkipperFullName, nameField)
-      )
-    }
-
-    if (!pairFishing.pairVesselRssNumber) {
-      errors.push(
-        createValidationError(
-          'CONDITIONAL_FIELD_REQUIRED',
-          rssField,
-          'A pair vessel RSS number is required when pair fishing is enabled.'
-        )
-      )
-    } else {
-      errors.push(
-        ...validateIdentifier(pairFishing.pairVesselRssNumber, rssField)
-      )
-    }
+    errors.push(
+      ...validatePairFishingEnabledDetails(pairFishing, nameField, rssField)
+    )
   } else if (pairFishing.enabled === false) {
-    if (
-      pairFishing.pairSkipperFullName !== null &&
-      pairFishing.pairSkipperFullName !== undefined
-    ) {
-      errors.push(
-        createValidationError(
-          'CONDITIONAL_FIELD_PROHIBITED',
-          nameField,
-          'A pair skipper name must not be supplied when pair fishing is disabled.'
-        )
-      )
-    }
-
-    if (
-      pairFishing.pairVesselRssNumber !== null &&
-      pairFishing.pairVesselRssNumber !== undefined
-    ) {
-      errors.push(
-        createValidationError(
-          'CONDITIONAL_FIELD_PROHIBITED',
-          rssField,
-          'A pair vessel RSS number must not be supplied when pair fishing is disabled.'
-        )
-      )
-    }
+    errors.push(
+      ...validatePairFishingDisabledDetails(pairFishing, nameField, rssField)
+    )
+  } else {
+    // enabled is neither true nor false (already reported as INVALID_BOOLEAN above, or left null/
+    // undefined for an unanswered section) — no conditional detail rule applies.
   }
 
   return createValidationResult(errors)

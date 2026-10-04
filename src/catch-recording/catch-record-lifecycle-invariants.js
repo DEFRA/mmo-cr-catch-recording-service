@@ -51,16 +51,24 @@ function isNonNegativeInteger(value) {
   return Number.isInteger(value) && value >= 0
 }
 
-export function evaluateLifecycleInvariant({
+function isSupportedPersistedStatus(status) {
+  return (
+    status === CATCH_RECORD_STATUS.DRAFT ||
+    status === CATCH_RECORD_STATUS.SUBMITTED ||
+    status === CATCH_RECORD_STATUS.COMPLETE
+  )
+}
+
+// Validates the three basic input shapes shared by every lifecycle-invariant state, extracted to keep
+// `evaluateLifecycleInvariant` itself within the approved cyclomatic-complexity limit. Returns a denied
+// decision for the first basic violation found, or `null` when the input is well-formed enough to proceed
+// to state-specific invariant evaluation.
+function findBasicInvariantViolation({
   status,
   numberOfSubmissions,
   hasUnsubmittedChanges
 }) {
-  if (
-    status !== CATCH_RECORD_STATUS.DRAFT &&
-    status !== CATCH_RECORD_STATUS.SUBMITTED &&
-    status !== CATCH_RECORD_STATUS.COMPLETE
-  ) {
+  if (!isSupportedPersistedStatus(status)) {
     return createDeniedDecision(
       'PERSISTED_STATUS_UNSUPPORTED',
       'The supplied status is not an approved persisted status.',
@@ -83,6 +91,18 @@ export function evaluateLifecycleInvariant({
       { status }
     )
   }
+
+  return null
+}
+
+export function evaluateLifecycleInvariant(input) {
+  const basicViolation = findBasicInvariantViolation(input)
+
+  if (basicViolation) {
+    return basicViolation
+  }
+
+  const { status, numberOfSubmissions, hasUnsubmittedChanges } = input
 
   // Never-submitted draft.
   if (status === CATCH_RECORD_STATUS.DRAFT && numberOfSubmissions === 0) {
