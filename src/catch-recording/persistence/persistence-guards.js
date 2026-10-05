@@ -34,7 +34,13 @@ export function assertPlainString(value, fieldName) {
  * @param {number} maxLimit
  */
 export function assertSafeListLimit(value, maxLimit) {
-  if (!Number.isInteger(value) || value <= 0 || value > maxLimit) {
+  if (!Number.isInteger(value)) {
+    throw new TypeError(`"limit" must be an integer between 1 and ${maxLimit}`)
+  }
+
+  const integerValue = /** @type {number} */ (value)
+
+  if (integerValue <= 0 || integerValue > maxLimit) {
     throw new TypeError(`"limit" must be an integer between 1 and ${maxLimit}`)
   }
 }

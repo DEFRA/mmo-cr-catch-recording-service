@@ -30,11 +30,53 @@ const DISALLOWED_SEMANTIC_KEYS = Object.freeze([
   'prototype'
 ])
 
+function assertFiniteNumber(value) {
+  if (!Number.isFinite(value)) {
+    throw new TypeError(
+      '"semanticInput" must contain only finite numbers, never NaN or Infinity'
+    )
+  }
+}
+
+/**
+ * Rejects any object whose prototype is not the plain `Object.prototype` (or `null`) — `Date`, `Map`,
+ * `Set`, `RegExp`, and any other exotic/class-instance object are excluded by construction. A plain
+ * object is the only object shape a JSON-safe fingerprint input may take.
+ *
+ * @param {object} value
+ */
+function assertPlainObjectPrototype(value) {
+  const prototype = Object.getPrototypeOf(value)
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new TypeError(
+      '"semanticInput" must contain only plain objects, never a Date, Map, Set, RegExp, or class instance'
+    )
+  }
+}
+
+function assertJsonSafeArray(value, depth) {
+  for (const item of value) {
+    assertJsonSafeValue(item, depth + 1)
+  }
+}
+
+function assertJsonSafeObject(value, depth) {
+  assertPlainObjectPrototype(value)
+
+  for (const key of Object.keys(value)) {
+    if (DISALLOWED_SEMANTIC_KEYS.includes(key)) {
+      throw new TypeError(`"${key}" is not an allowed fingerprint field`)
+    }
+    assertJsonSafeValue(value[key], depth + 1)
+  }
+}
+
 /**
  * Recursively rejects anything that is not a JSON-safe value (`string`, finite `number`, `boolean`,
  * `null`, or a nested plain object/array of the same), bounded to `MAX_SEMANTIC_NESTING_DEPTH` levels.
  * Structurally excludes functions, symbols, `undefined`, `Date` instances, `Map`/`Set`, and prototype-
- * pollution-shaped keys at every level.
+ * pollution-shaped keys at every level. Delegates array/object handling to focused helpers above to
+ * keep this entry point's complexity low.
  *
  * @param {unknown} value
  * @param {number} depth
@@ -57,37 +99,17 @@ function assertJsonSafeValue(value, depth) {
   }
 
   if (type === 'number') {
-    if (!Number.isFinite(value)) {
-      throw new TypeError(
-        '"semanticInput" must contain only finite numbers, never NaN or Infinity'
-      )
-    }
+    assertFiniteNumber(value)
     return
   }
 
   if (Array.isArray(value)) {
-    for (const item of value) {
-      assertJsonSafeValue(item, depth + 1)
-    }
+    assertJsonSafeArray(value, depth)
     return
   }
 
   if (type === 'object') {
-    const prototype = Object.getPrototypeOf(value)
-    if (prototype !== Object.prototype && prototype !== null) {
-      // Rejects `Date`, `Map`, `Set`, `RegExp`, and any other exotic/class-instance object by
-      // construction — a plain object is the only object shape a JSON-safe fingerprint input may take.
-      throw new TypeError(
-        '"semanticInput" must contain only plain objects, never a Date, Map, Set, RegExp, or class instance'
-      )
-    }
-
-    for (const key of Object.keys(value)) {
-      if (DISALLOWED_SEMANTIC_KEYS.includes(key)) {
-        throw new TypeError(`"${key}" is not an allowed fingerprint field`)
-      }
-      assertJsonSafeValue(value[key], depth + 1)
-    }
+    assertJsonSafeObject(value, depth)
     return
   }
 
@@ -143,7 +165,12 @@ function canonicalise(value) {
   }
 
   if (value !== null && typeof value === 'object') {
-    const sortedKeys = Object.keys(value).sort()
+    // Locale pinned to `'en'` explicitly (rather than relying on the default `sort()` lexicographic
+    // compare) so key ordering — and therefore the resulting hash — stays identical across every
+    // runtime environment regardless of its default locale.
+    const sortedKeys = Object.keys(value).sort((a, b) =>
+      a.localeCompare(b, 'en')
+    )
     const canonicalObject = {}
     for (const key of sortedKeys) {
       canonicalObject[key] = canonicalise(value[key])
