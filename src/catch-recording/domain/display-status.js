@@ -23,7 +23,11 @@ function ownField(catchRecord, field) {
  * @returns {string|undefined}
  */
 function deriveDraftDisplayStatus(numberOfSubmissions) {
-  if (!Number.isInteger(numberOfSubmissions) || numberOfSubmissions < 0) {
+  if (
+    typeof numberOfSubmissions !== 'number' ||
+    !Number.isInteger(numberOfSubmissions) ||
+    numberOfSubmissions < 0
+  ) {
     return undefined
   }
 
