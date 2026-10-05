@@ -41,6 +41,42 @@ function toSafeAllowedValues(allowedValues) {
   return safeValues.length > 0 ? safeValues : undefined
 }
 
+function assignSafePath(safeDetail, rawDetail) {
+  if (!Object.hasOwn(rawDetail, 'path')) {
+    return
+  }
+
+  const safePath = toSafePath(rawDetail.path)
+  if (safePath !== undefined) {
+    safeDetail.path = safePath
+  }
+}
+
+function assignIfSafeType(safeDetail, rawDetail, field, isSafeType) {
+  if (Object.hasOwn(rawDetail, field) && isSafeType(rawDetail[field])) {
+    safeDetail[field] = rawDetail[field]
+  }
+}
+
+function assignSafeAllowedValues(safeDetail, rawDetail) {
+  if (!Object.hasOwn(rawDetail, 'allowedValues')) {
+    return
+  }
+
+  const safeAllowedValues = toSafeAllowedValues(rawDetail.allowedValues)
+  if (safeAllowedValues !== undefined) {
+    safeDetail.allowedValues = safeAllowedValues
+  }
+}
+
+function isString(value) {
+  return typeof value === 'string'
+}
+
+function isNumber(value) {
+  return typeof value === 'number'
+}
+
 function sanitiseDetail(rawDetail) {
   if (
     typeof rawDetail !== 'object' ||
@@ -52,37 +88,17 @@ function sanitiseDetail(rawDetail) {
 
   const safeDetail = {}
 
-  if (Object.hasOwn(rawDetail, 'path')) {
-    const safePath = toSafePath(rawDetail.path)
-    if (safePath !== undefined) {
-      safeDetail.path = safePath
-    }
-  }
+  assignSafePath(safeDetail, rawDetail)
 
   for (const field of ALLOWED_STRING_FIELDS) {
-    if (
-      Object.hasOwn(rawDetail, field) &&
-      typeof rawDetail[field] === 'string'
-    ) {
-      safeDetail[field] = rawDetail[field]
-    }
+    assignIfSafeType(safeDetail, rawDetail, field, isString)
   }
 
   for (const field of ALLOWED_NUMBER_FIELDS) {
-    if (
-      Object.hasOwn(rawDetail, field) &&
-      typeof rawDetail[field] === 'number'
-    ) {
-      safeDetail[field] = rawDetail[field]
-    }
+    assignIfSafeType(safeDetail, rawDetail, field, isNumber)
   }
 
-  if (Object.hasOwn(rawDetail, 'allowedValues')) {
-    const safeAllowedValues = toSafeAllowedValues(rawDetail.allowedValues)
-    if (safeAllowedValues !== undefined) {
-      safeDetail.allowedValues = safeAllowedValues
-    }
-  }
+  assignSafeAllowedValues(safeDetail, rawDetail)
 
   return Object.keys(safeDetail).length > 0
     ? Object.freeze(safeDetail)
