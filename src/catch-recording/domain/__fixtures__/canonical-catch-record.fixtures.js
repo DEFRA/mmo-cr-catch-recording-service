@@ -19,6 +19,8 @@ function deepFreeze(value) {
 
 const GEAR_ASSOCIATION_ID = 'b5ca27d2-8e5f-4920-89a5-d4756829b44e'
 const SPECIES_ASSOCIATION_ID = '0859623d-e2f8-4383-9705-bdc9760bf9a4'
+const SHARED_USER_ID = 'e0ec9737-908e-4749-97e0-41caf19de2c2'
+const FIRST_SUBMISSION_AT = '2026-10-05T12:15:00Z'
 
 function baseGear() {
   return {
@@ -72,7 +74,7 @@ function baseCatchRecord(overrides) {
     schemaVersion: CANONICAL_SCHEMA_VERSION,
     id: '5f9c6586-3bf0-4fbb-95d8-ef2cf9c1d9af',
     catchRecordReference: 'GBR-RSS123456-051026-113500',
-    ownerUserId: 'e0ec9737-908e-4749-97e0-41caf19de2c2',
+    ownerUserId: SHARED_USER_ID,
     version: 1,
     vessel: {
       id: '0fe4d4aa-22f8-449e-89c9-b7052bae8667',
@@ -112,9 +114,9 @@ function baseCatchRecord(overrides) {
     },
     artifacts: [],
     createdAt: '2026-10-05T10:35:00Z',
-    createdBy: 'e0ec9737-908e-4749-97e0-41caf19de2c2',
+    createdBy: SHARED_USER_ID,
     updatedAt: '2026-10-05T10:35:00Z',
-    updatedBy: 'e0ec9737-908e-4749-97e0-41caf19de2c2',
+    updatedBy: SHARED_USER_ID,
     submittedAt: null,
     submittedBy: null,
     completedAt: null,
@@ -165,8 +167,8 @@ export const submittedExample = deepFreeze(
       { submissionNumber: 1, type: 'JSON_SNAPSHOT' },
       { submissionNumber: 1, type: 'PDF_RECEIPT' }
     ],
-    submittedAt: '2026-10-05T12:15:00Z',
-    submittedBy: 'e0ec9737-908e-4749-97e0-41caf19de2c2'
+    submittedAt: FIRST_SUBMISSION_AT,
+    submittedBy: SHARED_USER_ID
   })
 )
 
@@ -184,8 +186,8 @@ export const amendedDraftExample = deepFreeze(
       { submissionNumber: 1, type: 'JSON_SNAPSHOT' },
       { submissionNumber: 1, type: 'PDF_RECEIPT' }
     ],
-    submittedAt: '2026-10-05T12:15:00Z',
-    submittedBy: 'e0ec9737-908e-4749-97e0-41caf19de2c2'
+    submittedAt: FIRST_SUBMISSION_AT,
+    submittedBy: SHARED_USER_ID
   })
 )
 
@@ -199,9 +201,9 @@ export const completeExample = deepFreeze(
       { submissionNumber: 1, type: 'JSON_SNAPSHOT' },
       { submissionNumber: 1, type: 'PDF_RECEIPT' }
     ],
-    submittedAt: '2026-10-05T12:15:00Z',
-    submittedBy: 'e0ec9737-908e-4749-97e0-41caf19de2c2',
+    submittedAt: FIRST_SUBMISSION_AT,
+    submittedBy: SHARED_USER_ID,
     completedAt: '2026-10-06T09:00:00Z',
-    completedBy: 'e0ec9737-908e-4749-97e0-41caf19de2c2'
+    completedBy: SHARED_USER_ID
   })
 )

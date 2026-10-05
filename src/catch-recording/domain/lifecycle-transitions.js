@@ -7,6 +7,8 @@ import {
   formatPath
 } from '../validation/validation-result.js'
 
+const INVALID_CATCH_RECORD_MESSAGE = 'Invalid Catch Record'
+
 function issue(pathSegments, message) {
   return {
     code: LIFECYCLE_CODES.INELIGIBLE_TRANSITION,
@@ -31,7 +33,7 @@ function isObject(value) {
  */
 export function canSubmitFirstTime(catchRecord) {
   if (!isObject(catchRecord)) {
-    return createInvalidResult(issue([], 'Invalid Catch Record'))
+    return createInvalidResult(issue([], INVALID_CATCH_RECORD_MESSAGE))
   }
 
   if (ownField(catchRecord, 'status') !== PERSISTED_STATUSES.DRAFT) {
@@ -63,7 +65,7 @@ export function canSubmitFirstTime(catchRecord) {
  */
 export function canComplete(catchRecord) {
   if (!isObject(catchRecord)) {
-    return createInvalidResult(issue([], 'Invalid Catch Record'))
+    return createInvalidResult(issue([], INVALID_CATCH_RECORD_MESSAGE))
   }
 
   if (ownField(catchRecord, 'status') !== PERSISTED_STATUSES.SUBMITTED) {
@@ -94,7 +96,7 @@ export function buildCompletionFacts(_catchRecord) {
  */
 export function canStartEdit(catchRecord) {
   if (!isObject(catchRecord)) {
-    return createInvalidResult(issue([], 'Invalid Catch Record'))
+    return createInvalidResult(issue([], INVALID_CATCH_RECORD_MESSAGE))
   }
 
   const status = ownField(catchRecord, 'status')
@@ -144,7 +146,7 @@ export function buildEditStartFacts(catchRecord) {
  */
 export function canResubmit(catchRecord) {
   if (!isObject(catchRecord)) {
-    return createInvalidResult(issue([], 'Invalid Catch Record'))
+    return createInvalidResult(issue([], INVALID_CATCH_RECORD_MESSAGE))
   }
 
   if (!isAmendedDraft(catchRecord)) {
@@ -169,7 +171,7 @@ export function canResubmit(catchRecord) {
  * @param {number} nextSubmissionNumber
  * @returns {object}
  */
-export function buildResubmissionFacts(catchRecord, nextSubmissionNumber) {
+export function buildResubmissionFacts(_catchRecord, nextSubmissionNumber) {
   return {
     status: PERSISTED_STATUSES.SUBMITTED,
     numberOfSubmissions: nextSubmissionNumber,
@@ -186,7 +188,7 @@ export function buildResubmissionFacts(catchRecord, nextSubmissionNumber) {
  */
 export function canAbandon(catchRecord) {
   if (!isObject(catchRecord)) {
-    return createInvalidResult(issue([], 'Invalid Catch Record'))
+    return createInvalidResult(issue([], INVALID_CATCH_RECORD_MESSAGE))
   }
 
   if (ownField(catchRecord, 'status') !== PERSISTED_STATUSES.DRAFT) {

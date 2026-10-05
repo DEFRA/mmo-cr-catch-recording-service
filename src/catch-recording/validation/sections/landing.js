@@ -9,6 +9,15 @@ function issue(code, pathSegments, message) {
   return { code, path: formatPath(pathSegments), message }
 }
 
+function isValidGearAssociation(gearAssociation) {
+  return (
+    typeof gearAssociation === 'object' &&
+    gearAssociation !== null &&
+    typeof gearAssociation.associationId === 'string' &&
+    gearAssociation.associationId.trim().length > 0
+  )
+}
+
 function buildSpeciesAssociationIdsByGear(gears) {
   const map = new Map()
 
@@ -17,18 +26,11 @@ function buildSpeciesAssociationIdsByGear(gears) {
   }
 
   for (const gearAssociation of gears) {
-    if (typeof gearAssociation !== 'object' || gearAssociation === null) {
+    if (!isValidGearAssociation(gearAssociation)) {
       continue
     }
 
     const { associationId } = gearAssociation
-    if (
-      typeof associationId !== 'string' ||
-      associationId.trim().length === 0
-    ) {
-      continue
-    }
-
     const speciesAssociationIds = new Set(
       Array.isArray(gearAssociation.speciesCaught)
         ? gearAssociation.speciesCaught

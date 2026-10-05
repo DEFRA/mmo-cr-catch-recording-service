@@ -8,6 +8,17 @@ import {
 } from './validation-result.js'
 
 const FORBIDDEN_ARTIFACT_BODY_FIELDS = ['content', 'body', 'json', 'pdf']
+const INVALID_STRUCTURE_MESSAGE = 'Invalid structure'
+// Root-level fields that must never appear on a Catch Record: statistical area and species always
+// belong to a gear association, never the root, and history is a separate append-only mechanism.
+const FORBIDDEN_ROOT_FIELDS = Object.freeze({
+  statisticalArea:
+    'Statistical area must belong to a gear association, not the Catch Record root',
+  speciesCaught:
+    'Species must belong to a gear association, not the Catch Record root',
+  history: 'History must not be embedded',
+  events: 'History must not be embedded'
+})
 
 function isPlainObject(value) {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -43,7 +54,11 @@ function validateContainerShape(
   }
 
   return [
-    issue(VALIDATION_CODES.INVALID_STRUCTURE, pathSegments, 'Invalid structure')
+    issue(
+      VALIDATION_CODES.INVALID_STRUCTURE,
+      pathSegments,
+      INVALID_STRUCTURE_MESSAGE
+    )
   ]
 }
 
@@ -57,7 +72,7 @@ function validateElementShape(value, pathSegments) {
         issue(
           VALIDATION_CODES.INVALID_STRUCTURE,
           pathSegments,
-          'Invalid structure'
+          INVALID_STRUCTURE_MESSAGE
         )
       ]
 }
@@ -155,10 +170,7 @@ function validateGearAssociation(gearAssociation, pathSegments) {
       {
         allowObject: true
       }
-    )
-  )
-
-  issues.push(
+    ),
     ...validateContainerShape(
       gearAssociation.speciesCaught,
       [...pathSegments, 'speciesCaught'],
@@ -211,6 +223,69 @@ function validateArtifacts(artifacts) {
   return issues
 }
 
+function validateRootEnumFields(catchRecord) {
+  const issues = []
+
+  if (
+    Object.hasOwn(catchRecord, 'schemaVersion') &&
+    catchRecord.schemaVersion !== undefined &&
+    catchRecord.schemaVersion !== CANONICAL_SCHEMA_VERSION
+  ) {
+    issues.push(
+      issue(
+        VALIDATION_CODES.UNSUPPORTED_VALUE,
+        ['schemaVersion'],
+        'Unsupported schema version'
+      )
+    )
+  }
+
+  if (
+    Object.hasOwn(catchRecord, 'status') &&
+    catchRecord.status !== undefined &&
+    !isPersistedStatus(catchRecord.status)
+  ) {
+    issues.push(
+      issue(
+        VALIDATION_CODES.UNSUPPORTED_VALUE,
+        ['status'],
+        'Unsupported status'
+      )
+    )
+  }
+
+  return issues
+}
+
+// Canonical hierarchy: statistical area/species always belong to a gear association (never the root),
+// and history/events (a separate append-only mechanism) must never be embedded in the operational
+// object.
+function validateForbiddenRootFields(catchRecord) {
+  const issues = []
+
+  for (const [field, message] of Object.entries(FORBIDDEN_ROOT_FIELDS)) {
+    if (Object.hasOwn(catchRecord, field)) {
+      issues.push(issue(VALIDATION_CODES.INVALID_STRUCTURE, [field], message))
+    }
+  }
+
+  return issues
+}
+
+function validateGearsCollection(catchRecord) {
+  const issues = validateContainerShape(catchRecord.gears, ['gears'], {
+    allowArray: true
+  })
+
+  if (Array.isArray(catchRecord.gears)) {
+    catchRecord.gears.forEach((gearAssociation, index) => {
+      issues.push(...validateGearAssociation(gearAssociation, ['gears', index]))
+    })
+  }
+
+  return issues
+}
+
 /**
  * Validates the canonical structural shape of a Catch Record (or a partial canonical input, since
  * completeness is never required here — only shape-if-present). Enforces the canonical hierarchy: no
@@ -224,41 +299,11 @@ function validateArtifacts(artifacts) {
 export function validateStructure(catchRecord) {
   if (!isPlainObject(catchRecord)) {
     return createInvalidResult(
-      issue(VALIDATION_CODES.INVALID_STRUCTURE, [], 'Invalid structure')
+      issue(VALIDATION_CODES.INVALID_STRUCTURE, [], INVALID_STRUCTURE_MESSAGE)
     )
   }
 
-  const issues = []
-
-  if (
-    Object.hasOwn(catchRecord, 'schemaVersion') &&
-    catchRecord.schemaVersion !== undefined
-  ) {
-    if (catchRecord.schemaVersion !== CANONICAL_SCHEMA_VERSION) {
-      issues.push(
-        issue(
-          VALIDATION_CODES.UNSUPPORTED_VALUE,
-          ['schemaVersion'],
-          'Unsupported schema version'
-        )
-      )
-    }
-  }
-
-  if (
-    Object.hasOwn(catchRecord, 'status') &&
-    catchRecord.status !== undefined
-  ) {
-    if (!isPersistedStatus(catchRecord.status)) {
-      issues.push(
-        issue(
-          VALIDATION_CODES.UNSUPPORTED_VALUE,
-          ['status'],
-          'Unsupported status'
-        )
-      )
-    }
-  }
+  const issues = [...validateRootEnumFields(catchRecord)]
 
   for (const field of ['vessel', 'trip', 'pairFishing', 'landing']) {
     issues.push(
@@ -268,52 +313,11 @@ export function validateStructure(catchRecord) {
     )
   }
 
-  // Canonical hierarchy: no root-level statistical area or species collection is ever permitted.
-  if (Object.hasOwn(catchRecord, 'statisticalArea')) {
-    issues.push(
-      issue(
-        VALIDATION_CODES.INVALID_STRUCTURE,
-        ['statisticalArea'],
-        'Statistical area must belong to a gear association, not the Catch Record root'
-      )
-    )
-  }
-
-  if (Object.hasOwn(catchRecord, 'speciesCaught')) {
-    issues.push(
-      issue(
-        VALIDATION_CODES.INVALID_STRUCTURE,
-        ['speciesCaught'],
-        'Species must belong to a gear association, not the Catch Record root'
-      )
-    )
-  }
-
-  // History is a separate append-only mechanism; it must never be embedded in the operational object.
-  for (const field of ['history', 'events']) {
-    if (Object.hasOwn(catchRecord, field)) {
-      issues.push(
-        issue(
-          VALIDATION_CODES.INVALID_STRUCTURE,
-          [field],
-          'History must not be embedded'
-        )
-      )
-    }
-  }
-
   issues.push(
-    ...validateContainerShape(catchRecord.gears, ['gears'], {
-      allowArray: true
-    })
+    ...validateForbiddenRootFields(catchRecord),
+    ...validateGearsCollection(catchRecord),
+    ...validateArtifacts(catchRecord.artifacts)
   )
-  if (Array.isArray(catchRecord.gears)) {
-    catchRecord.gears.forEach((gearAssociation, index) => {
-      issues.push(...validateGearAssociation(gearAssociation, ['gears', index]))
-    })
-  }
-
-  issues.push(...validateArtifacts(catchRecord.artifacts))
 
   return issues.length === 0 ? createValidResult() : createInvalidResult(issues)
 }

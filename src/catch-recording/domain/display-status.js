@@ -11,6 +11,27 @@ export const DISPLAY_STATUSES = Object.freeze({
   COMPLETE: 'Complete'
 })
 
+function ownField(catchRecord, field) {
+  return Object.hasOwn(catchRecord, field) ? catchRecord[field] : undefined
+}
+
+/**
+ * Resolves the `Draft`/`Amended` split for a persisted `DRAFT` record. Returns `undefined` for an
+ * invalid `numberOfSubmissions` rather than inventing a fallback.
+ *
+ * @param {unknown} numberOfSubmissions
+ * @returns {string|undefined}
+ */
+function deriveDraftDisplayStatus(numberOfSubmissions) {
+  if (!Number.isInteger(numberOfSubmissions) || numberOfSubmissions < 0) {
+    return undefined
+  }
+
+  return numberOfSubmissions > 0
+    ? DISPLAY_STATUSES.AMENDED
+    : DISPLAY_STATUSES.DRAFT
+}
+
 /**
  * Derives the approved display status from `status` and `numberOfSubmissions`:
  * - `DRAFT` with zero submissions -> `Draft`.
@@ -30,12 +51,7 @@ export function deriveDisplayStatus(catchRecord) {
   }
 
   // Read only own properties - an inherited (prototype-chain) status/count must never be trusted.
-  const status = Object.hasOwn(catchRecord, 'status')
-    ? catchRecord.status
-    : undefined
-  const numberOfSubmissions = Object.hasOwn(catchRecord, 'numberOfSubmissions')
-    ? catchRecord.numberOfSubmissions
-    : undefined
+  const status = ownField(catchRecord, 'status')
 
   if (status === PERSISTED_STATUSES.SUBMITTED) {
     return DISPLAY_STATUSES.SUBMITTED
@@ -46,13 +62,9 @@ export function deriveDisplayStatus(catchRecord) {
   }
 
   if (status === PERSISTED_STATUSES.DRAFT) {
-    if (!Number.isInteger(numberOfSubmissions) || numberOfSubmissions < 0) {
-      return undefined
-    }
-
-    return numberOfSubmissions > 0
-      ? DISPLAY_STATUSES.AMENDED
-      : DISPLAY_STATUSES.DRAFT
+    return deriveDraftDisplayStatus(
+      ownField(catchRecord, 'numberOfSubmissions')
+    )
   }
 
   return undefined

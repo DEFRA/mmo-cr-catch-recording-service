@@ -6,6 +6,8 @@ import {
   formatPath
 } from '../validation/validation-result.js'
 
+const INVALID_CATCH_RECORD_MESSAGE = 'Invalid Catch Record'
+
 function issue(pathSegments, message) {
   return {
     code: LIFECYCLE_CODES.INCONSISTENT_STATE,
@@ -21,6 +23,17 @@ function ownField(catchRecord, field) {
 
 function isNonNegativeInteger(value) {
   return Number.isInteger(value) && value >= 0
+}
+
+/**
+ * Appends an issue to `issues` when `condition` is true. Centralising the "check, then push" pattern
+ * keeps each invariant-check function's cognitive complexity low: a series of independent field checks
+ * become a series of single-line calls rather than a series of `if` statements.
+ */
+function pushIssueIf(issues, condition, pathSegments, message) {
+  if (condition) {
+    issues.push(issue(pathSegments, message))
+  }
 }
 
 function hasCommittedArtifacts(catchRecord) {
@@ -62,7 +75,7 @@ export function isAmendedDraft(catchRecord) {
  */
 export function isNewDraft(catchRecord) {
   if (typeof catchRecord !== 'object' || catchRecord === null) {
-    return createInvalidResult(issue([], 'Invalid Catch Record'))
+    return createInvalidResult(issue([], INVALID_CATCH_RECORD_MESSAGE))
   }
 
   const issues = []
@@ -121,7 +134,7 @@ export function isNewDraft(catchRecord) {
  */
 export function isConsistentAmendedState(catchRecord) {
   if (typeof catchRecord !== 'object' || catchRecord === null) {
-    return createInvalidResult(issue([], 'Invalid Catch Record'))
+    return createInvalidResult(issue([], INVALID_CATCH_RECORD_MESSAGE))
   }
 
   const issues = []
@@ -171,80 +184,67 @@ export function isConsistentAmendedState(catchRecord) {
  */
 export function isConsistentSubmittedState(catchRecord) {
   if (typeof catchRecord !== 'object' || catchRecord === null) {
-    return createInvalidResult(issue([], 'Invalid Catch Record'))
+    return createInvalidResult(issue([], INVALID_CATCH_RECORD_MESSAGE))
   }
 
   const issues = []
   const numberOfSubmissions = ownField(catchRecord, 'numberOfSubmissions')
 
-  if (ownField(catchRecord, 'status') !== PERSISTED_STATUSES.SUBMITTED) {
-    issues.push(
-      issue(['status'], 'A submitted record must have status SUBMITTED')
-    )
-  }
+  pushIssueIf(
+    issues,
+    ownField(catchRecord, 'status') !== PERSISTED_STATUSES.SUBMITTED,
+    ['status'],
+    'A submitted record must have status SUBMITTED'
+  )
 
-  if (!isNonNegativeInteger(numberOfSubmissions) || numberOfSubmissions < 1) {
-    issues.push(
-      issue(
-        ['numberOfSubmissions'],
-        'A submitted record must have at least one submission'
-      )
-    )
-  }
+  pushIssueIf(
+    issues,
+    !isNonNegativeInteger(numberOfSubmissions) || numberOfSubmissions < 1,
+    ['numberOfSubmissions'],
+    'A submitted record must have at least one submission'
+  )
 
-  if (ownField(catchRecord, 'hasUnsubmittedChanges') !== false) {
-    issues.push(
-      issue(
-        ['hasUnsubmittedChanges'],
-        'A submitted record must have no unsubmitted changes'
-      )
-    )
-  }
+  pushIssueIf(
+    issues,
+    ownField(catchRecord, 'hasUnsubmittedChanges') !== false,
+    ['hasUnsubmittedChanges'],
+    'A submitted record must have no unsubmitted changes'
+  )
 
-  if (ownField(catchRecord, 'submittedAt') == null) {
-    issues.push(
-      issue(
-        ['submittedAt'],
-        'A submitted record must carry current submission metadata'
-      )
-    )
-  }
+  pushIssueIf(
+    issues,
+    ownField(catchRecord, 'submittedAt') == null,
+    ['submittedAt'],
+    'A submitted record must carry current submission metadata'
+  )
 
-  if (ownField(catchRecord, 'submittedBy') == null) {
-    issues.push(
-      issue(
-        ['submittedBy'],
-        'A submitted record must carry current submission metadata'
-      )
-    )
-  }
+  pushIssueIf(
+    issues,
+    ownField(catchRecord, 'submittedBy') == null,
+    ['submittedBy'],
+    'A submitted record must carry current submission metadata'
+  )
 
-  if (!hasCommittedArtifacts(catchRecord)) {
-    issues.push(
-      issue(
-        ['artifacts'],
-        'A submitted record must have committed submission artifacts'
-      )
-    )
-  }
+  pushIssueIf(
+    issues,
+    !hasCommittedArtifacts(catchRecord),
+    ['artifacts'],
+    'A submitted record must have committed submission artifacts'
+  )
 
-  if (ownField(catchRecord, 'completedAt') !== null) {
-    issues.push(
-      issue(
-        ['completedAt'],
-        'A submitted record must not carry completion metadata'
-      )
-    )
-  }
+  pushIssueIf(
+    issues,
+    ownField(catchRecord, 'completedAt') !== null,
+    ['completedAt'],
+    'A submitted record must not carry completion metadata'
+  )
 
-  if (ownField(catchRecord, 'completedBy') !== null) {
-    issues.push(
-      issue(
-        ['completedBy'],
-        'A submitted record must not carry completion metadata'
-      )
-    )
-  }
+  pushIssueIf(
+    issues,
+    ownField(catchRecord, 'completedBy') !== null,
+    ['completedBy'],
+    'A submitted record must not carry completion metadata'
+  )
 
   return issues.length === 0 ? createValidResult() : createInvalidResult(issues)
 }
@@ -258,35 +258,32 @@ export function isConsistentSubmittedState(catchRecord) {
  */
 export function isConsistentCompletedState(catchRecord) {
   if (typeof catchRecord !== 'object' || catchRecord === null) {
-    return createInvalidResult(issue([], 'Invalid Catch Record'))
+    return createInvalidResult(issue([], INVALID_CATCH_RECORD_MESSAGE))
   }
 
   const issues = []
   const numberOfSubmissions = ownField(catchRecord, 'numberOfSubmissions')
 
-  if (ownField(catchRecord, 'status') !== PERSISTED_STATUSES.COMPLETE) {
-    issues.push(
-      issue(['status'], 'A completed record must have status COMPLETE')
-    )
-  }
+  pushIssueIf(
+    issues,
+    ownField(catchRecord, 'status') !== PERSISTED_STATUSES.COMPLETE,
+    ['status'],
+    'A completed record must have status COMPLETE'
+  )
 
-  if (!isNonNegativeInteger(numberOfSubmissions) || numberOfSubmissions < 1) {
-    issues.push(
-      issue(
-        ['numberOfSubmissions'],
-        'A completed record must have at least one submission'
-      )
-    )
-  }
+  pushIssueIf(
+    issues,
+    !isNonNegativeInteger(numberOfSubmissions) || numberOfSubmissions < 1,
+    ['numberOfSubmissions'],
+    'A completed record must have at least one submission'
+  )
 
-  if (ownField(catchRecord, 'hasUnsubmittedChanges') !== false) {
-    issues.push(
-      issue(
-        ['hasUnsubmittedChanges'],
-        'A completed record must have no unsubmitted changes'
-      )
-    )
-  }
+  pushIssueIf(
+    issues,
+    ownField(catchRecord, 'hasUnsubmittedChanges') !== false,
+    ['hasUnsubmittedChanges'],
+    'A completed record must have no unsubmitted changes'
+  )
 
   for (const field of [
     'submittedAt',
@@ -294,24 +291,20 @@ export function isConsistentCompletedState(catchRecord) {
     'completedAt',
     'completedBy'
   ]) {
-    if (ownField(catchRecord, field) == null) {
-      issues.push(
-        issue(
-          [field],
-          'A completed record must carry submission and completion metadata'
-        )
-      )
-    }
-  }
-
-  if (!hasCommittedArtifacts(catchRecord)) {
-    issues.push(
-      issue(
-        ['artifacts'],
-        'A completed record must preserve its submission artifacts'
-      )
+    pushIssueIf(
+      issues,
+      ownField(catchRecord, field) == null,
+      [field],
+      'A completed record must carry submission and completion metadata'
     )
   }
+
+  pushIssueIf(
+    issues,
+    !hasCommittedArtifacts(catchRecord),
+    ['artifacts'],
+    'A completed record must preserve its submission artifacts'
+  )
 
   return issues.length === 0 ? createValidResult() : createInvalidResult(issues)
 }
@@ -325,7 +318,7 @@ export function isConsistentCompletedState(catchRecord) {
  */
 export function checkLifecycleInvariants(catchRecord) {
   if (typeof catchRecord !== 'object' || catchRecord === null) {
-    return createInvalidResult(issue([], 'Invalid Catch Record'))
+    return createInvalidResult(issue([], INVALID_CATCH_RECORD_MESSAGE))
   }
 
   const status = ownField(catchRecord, 'status')
