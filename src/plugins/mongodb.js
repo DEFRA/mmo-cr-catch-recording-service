@@ -1,6 +1,10 @@
 import { MongoClient } from 'mongodb'
 import { LockManager } from 'mongo-locks'
 
+import { ensureCatchRecordIndexes } from '#/catch-recording/persistence/catch-persistence.js'
+import { ensureCatchHistoryIndexes } from '#/catch-recording/persistence/catch-history-persistence.js'
+import { ensureCatchIdempotencyIndexes } from '#/catch-recording/persistence/catch-idempotency-persistence.js'
+
 export const mongoDb = {
   plugin: {
     name: 'mongodb',
@@ -43,4 +47,8 @@ async function createIndexes(db) {
 
   // Example of how to create a mongodb index. Remove as required
   await db.collection('example-data').createIndex({ id: 1 })
+
+  await ensureCatchRecordIndexes(db)
+  await ensureCatchHistoryIndexes(db)
+  await ensureCatchIdempotencyIndexes(db)
 }
