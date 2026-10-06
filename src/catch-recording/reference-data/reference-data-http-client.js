@@ -59,34 +59,31 @@ async function attemptGet(options, { path, correlationId }) {
   return { status: response.status, body }
 }
 
-async function getWithRetry(options, { path, correlationId }) {
+async function getWithRetry(options, { path, correlationId }, attempt = 0) {
   const { retryCount, retryDelayMs } = options
-  let attempt = 0
 
-  // An infinite loop with no `break`: every exit is an explicit `return` or `throw` below, so there is
-  // no implicit fall-through path returning `undefined`.
-  while (true) {
-    try {
-      return await attemptGet(options, { path, correlationId })
-    } catch (cause) {
-      // Only the explicitly approved 502/503/504 transient statuses are ever retried. A timeout (this
-      // attempt's own AbortController firing) and any other network-level failure (DNS, connection
-      // refused, etc.) are reported immediately and distinctly - retry behaviour beyond the approved
-      // scope is never invented.
-      if (cause?.name === 'AbortError') {
-        throw upstreamTimeoutError(cause)
-      }
-      if (cause?.retryableStatus !== true) {
-        throw dependencyUnavailableError(cause)
-      }
-
-      const isLastAttempt = attempt === retryCount
-      if (isLastAttempt) {
-        throw dependencyUnavailableError(cause)
-      }
-      await sleep(retryDelayMs)
-      attempt += 1
+  try {
+    return await attemptGet(options, { path, correlationId })
+  } catch (cause) {
+    // Only the explicitly approved 502/503/504 transient statuses are ever retried. A timeout (this
+    // attempt's own AbortController firing) and any other network-level failure (DNS, connection
+    // refused, etc.) are reported immediately and distinctly - retry behaviour beyond the approved
+    // scope is never invented.
+    if (cause?.name === 'AbortError') {
+      throw upstreamTimeoutError(cause)
     }
+    if (cause?.retryableStatus !== true) {
+      throw dependencyUnavailableError(cause)
+    }
+
+    const isLastAttempt = attempt === retryCount
+    if (isLastAttempt) {
+      throw dependencyUnavailableError(cause)
+    }
+    await sleep(retryDelayMs)
+    // Recursion (not a loop) for the next attempt: every exit from this function is an explicit
+    // `return`/`throw`, and `retryCount` bounds the recursion depth to a small, fixed number.
+    return getWithRetry(options, { path, correlationId }, attempt + 1)
   }
 }
 

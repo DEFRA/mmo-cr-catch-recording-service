@@ -29,7 +29,7 @@ function isValidLocalName(entry) {
 }
 
 function isValidNameArray(value, isValidEntry) {
-  return Array.isArray(value) && value.every(isValidEntry)
+  return Array.isArray(value) && value.every((entry) => isValidEntry(entry))
 }
 
 function hasValidSpeciesScalarFields(body) {

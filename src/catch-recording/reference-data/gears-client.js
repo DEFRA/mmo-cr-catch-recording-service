@@ -67,7 +67,9 @@ function isValidGearItem(entry) {
 
   return (
     Array.isArray(entry.applicableCharacteristics) &&
-    entry.applicableCharacteristics.every(isValidApplicableCharacteristic)
+    entry.applicableCharacteristics.every((characteristic) =>
+      isValidApplicableCharacteristic(characteristic)
+    )
   )
 }
 
@@ -134,9 +136,9 @@ function validateAndResolveGearResponse(body) {
 
   if (
     !Array.isArray(items) ||
-    !items.every(isValidGearItem) ||
+    !items.every((item) => isValidGearItem(item)) ||
     !Array.isArray(characteristics) ||
-    !characteristics.every(isValidCharacteristicCatalogEntry)
+    !characteristics.every((entry) => isValidCharacteristicCatalogEntry(entry))
   ) {
     return null
   }

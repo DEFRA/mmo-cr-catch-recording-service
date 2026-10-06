@@ -76,31 +76,31 @@ async function attemptValidate(options, { token, correlationId }) {
   return actor
 }
 
-async function validateWithRetry(options, { token, correlationId }) {
+async function validateWithRetry(
+  options,
+  { token, correlationId },
+  attempt = 0
+) {
   const { retryCount, retryDelayMs } = options
-  let attempt = 0
 
-  // An infinite loop with no `break`: every exit is an explicit `return` or `throw` below, so there is
-  // no implicit fall-through path returning `undefined` (avoids an inconsistent-return finding while
-  // still bounding actual attempts to `retryCount + 1` via the `isLastAttempt` check).
-  while (true) {
-    try {
-      return await attemptValidate(options, { token, correlationId })
-    } catch (cause) {
-      // A malformed response is already a safe ApplicationError raised above - never retry it, and
-      // never swallow it into the generic retry-exhaustion path.
-      if (isApplicationError(cause)) {
-        throw cause
-      }
-
-      const isLastAttempt = attempt === retryCount
-      if (isLastAttempt || cause.retryableStatus === false) {
-        throw authenticationRequiredError(cause)
-      }
-
-      await sleep(retryDelayMs)
-      attempt += 1
+  try {
+    return await attemptValidate(options, { token, correlationId })
+  } catch (cause) {
+    // A malformed response is already a safe ApplicationError raised above - never retry it, and
+    // never swallow it into the generic retry-exhaustion path.
+    if (isApplicationError(cause)) {
+      throw cause
     }
+
+    const isLastAttempt = attempt === retryCount
+    if (isLastAttempt || cause.retryableStatus === false) {
+      throw authenticationRequiredError(cause)
+    }
+
+    await sleep(retryDelayMs)
+    // Recursion (not a loop) for the next attempt: every exit from this function is an explicit
+    // `return`/`throw`, and `retryCount` bounds the recursion depth to a small, fixed number.
+    return validateWithRetry(options, { token, correlationId }, attempt + 1)
   }
 }
 
