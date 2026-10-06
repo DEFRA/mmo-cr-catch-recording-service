@@ -144,13 +144,20 @@ code, name, areaType, parentCode?, parentName?, areaKm2?, centroid? }, geometry 
   `areaKm2`, `centroid`, and `geometry` are read-but-unused today (exposed on the client result only if a
   future approved consumer needs them, never invented fields beyond what the schema above confirms).
 - **Service-to-service authentication**: `Authorization: Bearer <token>`, validated by the same
-  Authentication Service `/validate` contract as Step 13.
+  Authentication Service `/validate` contract as Step 13. **Addendum (resolving the token-issuance gap
+  flagged in the original research):** Catch Recording presents its **own** configured service
+  credential, not the inbound caller's bearer token — the step prompt explicitly discourages
+  caller-token-forwarding "unless explicitly approved", and no such approval exists. The credential is a
+  static, secret-sourced token (`referenceData.serviceToken`, never logged, never a placeholder default),
+  matching the "shortest safe implementation" philosophy — no OAuth client-credentials dance or signed
+  JWT is introduced without an approved requirement for one.
 - **Timeout / retry**: `referenceData.timeoutMs` (env `REFERENCE_DATA_SERVICE_TIMEOUT_MS`, default `2000`),
   one bounded retry (`referenceData.retryCount` / `REFERENCE_DATA_SERVICE_RETRY_COUNT`, default `1`,
   `referenceData.retryDelayMs` / `REFERENCE_DATA_SERVICE_RETRY_DELAY_MS`, default `100`), retrying only
   transient `502`/`503`/`504` failures — never `4xx`.
-- **Config**: `referenceData.baseUrl` (env `REFERENCE_DATA_SERVICE_URL`), alongside the timeout/retry keys
-  above.
+- **Config**: `referenceData.baseUrl` (env `REFERENCE_DATA_SERVICE_URL`), `referenceData.serviceToken`
+  (env `REFERENCE_DATA_SERVICE_TOKEN`, nullable, never defaulted to a non-null value), alongside the
+  timeout/retry keys above.
 
 ### Reference validation and snapshot resolution (Step 16)
 
