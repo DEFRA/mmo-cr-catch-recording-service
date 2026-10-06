@@ -21,6 +21,10 @@ const HTTP_STATUS_OK = 200
 const HTTP_STATUS_CREATED = 201
 const HTTP_STATUS_NO_CONTENT = 204
 
+/** The single-resource Catch Record path, shared by every `GET`/`PUT`/`DELETE`/`PATCH` route that
+ * addresses one Catch Record by ID - defined once to avoid duplicating the literal across routes. */
+const CATCH_RECORD_PATH = '/v1/catch-records/{catchRecordId}'
+
 /** Step 30 approved mobile complete-replacement payload ceiling (user-confirmed, no earlier approved
  * value existed): 1 MB. */
 const MAX_COMPLETE_REPLACEMENT_PAYLOAD_BYTES = 1_048_576
@@ -221,7 +225,7 @@ export const catchRecords = [
   },
   {
     method: 'GET',
-    path: '/v1/catch-records/{catchRecordId}',
+    path: CATCH_RECORD_PATH,
     options: {
       auth: AUTH_STRATEGY,
       validate: {
@@ -232,7 +236,7 @@ export const catchRecords = [
   },
   {
     method: 'PUT',
-    path: '/v1/catch-records/{catchRecordId}',
+    path: CATCH_RECORD_PATH,
     options: {
       auth: AUTH_STRATEGY,
       payload: { maxBytes: MAX_COMPLETE_REPLACEMENT_PAYLOAD_BYTES },
@@ -246,7 +250,7 @@ export const catchRecords = [
   },
   {
     method: 'GET',
-    path: '/v1/catch-records/{catchRecordId}/history',
+    path: `${CATCH_RECORD_PATH}/history`,
     options: {
       auth: AUTH_STRATEGY,
       validate: {
@@ -258,7 +262,7 @@ export const catchRecords = [
   },
   {
     method: 'DELETE',
-    path: '/v1/catch-records/{catchRecordId}',
+    path: CATCH_RECORD_PATH,
     options: {
       auth: AUTH_STRATEGY,
       validate: {
@@ -270,7 +274,7 @@ export const catchRecords = [
   },
   {
     method: 'PATCH',
-    path: '/v1/catch-records/{catchRecordId}',
+    path: CATCH_RECORD_PATH,
     options: {
       auth: AUTH_STRATEGY,
       validate: {
