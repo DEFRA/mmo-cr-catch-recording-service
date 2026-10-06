@@ -118,22 +118,31 @@ its real (mocked) HTTP contract directly, mirroring the already-implemented clie
 
 ### Reference Data Service client (Step 15)
 
-- **Endpoints**: only `GET /api/v1/reference-data/{vessels,gears,ports,species}` and
-  `GET /api/v1/reference-data/{vessels,gears,ports,species}/{id}`. No separate gear-characteristics or
-  species-attributes endpoints exist or are called — gear characteristics are nested inside the `gears`
-  collection/item response; species "attributes" are not Reference Data Service concepts at all (see
-  below).
+- **Endpoints**: `GET /api/v1/reference-data/{vessels,gears,ports,species}` and
+  `GET /api/v1/reference-data/{vessels,gears,ports,species}/{id}`, plus **statistical areas** (added as an
+  addendum after the detailed implementation plan's own decision list flagged "exact endpoint for
+  statistical-area retrieval" as required before Step 15, which the original research pass missed):
+  `GET /api/v1/reference-data/map/statistical-areas/{id}` only (the item lookup; Catch Recording never
+  needs the bounded collection/search endpoint, since a statistical area is always resolved by the one
+  stable ID the user already selected). No separate gear-characteristics or species-attributes endpoints
+  exist or are called — gear characteristics are nested inside the `gears` collection/item response;
+  species "attributes" are not Reference Data Service concepts at all (see below).
 - **Request contract**: canonical representation only — **no `view` query parameter is ever sent**
   (no mobile view is used). Supported query parameters: `ids` (comma-separated GUIDs, max 50), per-dataset
   exact filters, `includeInactive` (`true`/`false`, default `false`), `sort`, `offset`/`limit`
-  (default 50 / max 500).
+  (default 50 / max 500). The statistical-area item endpoint takes no query parameters.
 - **Response contract**: the canonical collection-envelope schemas as implemented in
   `mmo-cr-reference-data-service` (`dataset, collectionId, schemaVersion, version, itemCount, items[]`),
   with dataset item shapes: vessel (`id, name, namePln, identifiers{cfr,uvi,mmsi,ircs,externalMark,
 registrationNumber}, lengthOverallMetres, status, activeFrom, activeTo`), gear (`id, code, name, type,
 categoryId, pairFishing, applicableCharacteristics[], active`, plus collection-level `categories[]` /
   `characteristics[]`), port (`id, code, name, countryCode, coordinate, active`), species (`id, faoCode,
-scientificName, commonNames[], localNames[], active`).
+scientificName, commonNames[], localNames[], active`). **Statistical area** uses a GeoJSON `Feature`
+  shape, not the flat JSON item shape of the other four types: `{ type: 'Feature', id, properties: { id,
+code, name, areaType, parentCode?, parentName?, areaKm2?, centroid? }, geometry }` — only
+  `properties.id`/`code`/`name` are consumed by Step 15/16; `areaType`, `parentCode`, `parentName`,
+  `areaKm2`, `centroid`, and `geometry` are read-but-unused today (exposed on the client result only if a
+  future approved consumer needs them, never invented fields beyond what the schema above confirms).
 - **Service-to-service authentication**: `Authorization: Bearer <token>`, validated by the same
   Authentication Service `/validate` contract as Step 13.
 - **Timeout / retry**: `referenceData.timeoutMs` (env `REFERENCE_DATA_SERVICE_TIMEOUT_MS`, default `2000`),
@@ -148,7 +157,9 @@ scientificName, commonNames[], localNames[], active`).
 - **Active-selection semantics**: vessel — `status === 'active'` (string field); gear/port/species — a
   boolean `active` field. A collection query defaults to active-only (`includeInactive=false`); a direct
   item-by-ID lookup always returns the item regardless of active state, so a historical/inactive reference
-  already stored on a Catch Record can still be validated and re-displayed.
+  already stored on a Catch Record can still be validated and re-displayed. **Statistical area has no
+  active/inactive field at all** in the confirmed Reference Data Service schema — every statistical area
+  returned by the item endpoint is treated as active; no active-selection rule is applied to this type.
 - **Snapshot mapping** (canonical response field → approved `Snapshot` property in
   `canonical-catch-record-object.md` — no mobile view is used):
   - Vessel → `rssSnapshot` ← `identifiers.registrationNumber`; `nameSnapshot` ← `name`;
@@ -156,7 +167,8 @@ scientificName, commonNames[], localNames[], active`).
   - Departure/return port → `codeSnapshot` ← `code`; `nameSnapshot` ← `name`.
   - Gear → `codeSnapshot` ← `code`; `nameSnapshot` ← `name`.
   - Gear characteristic → `nameSnapshot` ← `name`; `unitSnapshot` ← `unit`.
-  - Statistical area → `codeSnapshot` ← `code`; `nameSnapshot` ← `name` (same shape as port/gear).
+  - Statistical area → `codeSnapshot` ← `properties.code`; `nameSnapshot` ← `properties.name` (read from
+    the GeoJSON Feature's `properties`, not root-level fields, per the confirmed schema).
   - Species → `faoCodeSnapshot` ← `faoCode`; `nameSnapshot` ← the first `commonNames[]` entry, falling
     back to `scientificName` when no common name is present (no mobile-view display-name resolver is used).
 - Historical snapshots already stored on a Catch Record are never rewritten merely because current
