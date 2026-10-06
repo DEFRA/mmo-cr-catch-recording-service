@@ -39,11 +39,13 @@ responsibilities, exclusions, and the approved dependency direction.
   amendment, artifact access, vessel-profile access, restricted completion), one shared policy-outcome
   contract, and one error-enforcement helper reusing the existing Step 03 error categories. See
   [`docs/catch-recording-authorisation.md`](../../docs/catch-recording-authorisation.md).
-- `reference-data/` — the Step 15 Reference Data Service client: five explicit, read-only resource
-  operations (vessel, gear, port, species, statistical area by stable ID), bounded timeout/retry,
-  correlation propagation, service authentication, and strict hand-rolled response validation reusing the
-  existing Step 03 error categories. See
-  [`docs/catch-recording-reference-data.md`](../../docs/catch-recording-reference-data.md).
+- `reference-data/` — the Step 15 Reference Data Service client (five explicit, read-only resource
+  operations, bounded timeout/retry, correlation propagation, service authentication, strict hand-rolled
+  response validation) and the Step 16 reference validation and snapshot resolution (stable-ID
+  validation, active-selection rules, the one supported relationship check — gear characteristic → gear,
+  vessel-access composition with Step 14, canonical snapshot mapping, and historical-snapshot
+  preservation). See [`docs/catch-recording-reference-data.md`](../../docs/catch-recording-reference-data.md)
+  and [`docs/catch-recording-reference-resolution.md`](../../docs/catch-recording-reference-resolution.md).
 
 Rules for adding code here:
 

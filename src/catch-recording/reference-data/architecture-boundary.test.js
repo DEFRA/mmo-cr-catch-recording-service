@@ -10,7 +10,13 @@ const FRAMEWORK_NEUTRAL_FILES = [
   'ports-client.js',
   'species-client.js',
   'statistical-areas-client.js',
-  'reference-data-client.js'
+  'reference-data-client.js',
+  'active-selection.js',
+  'catch-detail-attributes.js',
+  'snapshot-mappers.js',
+  'reference-resolvers.js',
+  'vessel-resolution.js',
+  'historical-snapshot.js'
 ]
 
 describe('#architecture-boundary (reference-data)', () => {
