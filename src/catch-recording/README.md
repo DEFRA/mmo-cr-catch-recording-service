@@ -34,6 +34,11 @@ responsibilities, exclusions, and the approved dependency direction.
   framework-neutral `{ userId, scopes }` context mapper, and a dormant Hapi `authentication-service` auth
   scheme/plugin (no route is enforced yet). See
   [`docs/catch-recording-authentication.md`](../../docs/catch-recording-authentication.md).
+- `security/` — the Step 14 resource-authorisation policies: ten explicit, default-deny, framework-neutral
+  policies (vessel access, Catch Record ownership, read, draft-update, draft-abandonment, submission,
+  amendment, artifact access, vessel-profile access, restricted completion), one shared policy-outcome
+  contract, and one error-enforcement helper reusing the existing Step 03 error categories. See
+  [`docs/catch-recording-authorisation.md`](../../docs/catch-recording-authorisation.md).
 
 Rules for adding code here:
 
