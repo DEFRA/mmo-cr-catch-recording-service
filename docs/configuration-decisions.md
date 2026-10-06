@@ -290,10 +290,10 @@ weightAboveMinimumKg?, weightBelowMinimumKg?, weightLegallyDiscardedKg?, weightP
   existing deterministic default order (`createdAt` descending, `_id` ascending tie-break) is used as-is.
 - **Response envelopes**: the Step 28 list envelope is `{ items, limit, count }`; the Step 29 complete
   retrieval returns the full canonical record plus `{ displayStatus, sectionCompletion,
-  completedSections, incompleteSections, progress, submissionEligible }`; the Step 30 `PUT` success
+completedSections, incompleteSections, progress, submissionEligible }`; the Step 30 `PUT` success
   response reuses the existing Step 22 `buildStandardSaveResponse` shape unchanged; the Step 31 history
   envelope is `{ catchRecordId, status, displayStatus, version, hasUnsubmittedChanges,
-  numberOfSubmissions, events: [{ id, eventType, timestamp, actor, section?, submissionNumber? }] }`.
+numberOfSubmissions, events: [{ id, eventType, timestamp, actor, section?, submissionNumber? }] }`.
 - **Step 30 maximum mobile payload size**: `1 MB` (`1,048,576` bytes), enforced via the route's
   `payload.maxBytes`. No earlier approved value existed anywhere (this was the one decision the Step 04
   plan explicitly flagged as blocking, then deferred — see above).
@@ -320,7 +320,7 @@ weightAboveMinimumKg?, weightBelowMinimumKg?, weightLegallyDiscardedKg?, weightP
   (`validateTrip`/`validatePairFishing`/`validateGears`/`validateSpeciesNotLanded`) — the same ones the
   existing PATCH pipeline already dispatches — rather than the aggregate `validateCatchRecord`/
   `validateStructure`. Discovered during implementation: `validateStructure`'s gear-structure rule
-  requires `associationId` on every gear unconditionally, which is correct for an already-*reconciled*
+  requires `associationId` on every gear unconditionally, which is correct for an already-_reconciled_
   persisted canonical record (what Step 32 will validate) but wrong for a pre-reconciliation payload that
   may legitimately add a brand-new gear with no client-supplied `associationId` yet (exactly as the
   existing PATCH `gears` section already permits).
