@@ -8,7 +8,7 @@ const OPTIONS = {
 }
 
 describe('#createReferenceDataClient', () => {
-  test('Should expose exactly the five approved operations and nothing else', () => {
+  test('Should expose exactly the six approved operations and nothing else', () => {
     const client = createReferenceDataClient(OPTIONS)
 
     expect(Object.keys(client).sort()).toEqual([
@@ -16,7 +16,8 @@ describe('#createReferenceDataClient', () => {
       'getPortById',
       'getSpeciesById',
       'getStatisticalAreaById',
-      'getVesselById'
+      'getVesselById',
+      'listAccessibleVesselIds'
     ])
   })
 

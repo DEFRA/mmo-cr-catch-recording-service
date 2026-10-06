@@ -127,6 +127,12 @@ export const config = convict({
       env: 'TRACING_HEADER'
     }
   },
+  businessTimezone: {
+    doc: 'Approved IANA business timezone used for every server-controlled Catch Record business date/time (e.g. the friendly Catch Record reference, trip "today" dates) - never the host machine or request timezone',
+    format: String,
+    default: 'Europe/London',
+    env: 'BUSINESS_TIMEZONE'
+  },
   authentication: {
     baseUrl: {
       doc: 'Base URL of the Authentication Service used to validate trusted caller bearer tokens',

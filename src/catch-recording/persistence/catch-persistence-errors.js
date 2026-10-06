@@ -83,6 +83,22 @@ export function unexpectedPersistenceError(cause) {
 }
 
 /**
+ * Builds the safe, deterministic `ApplicationError` for Step 19's eligible-draft-abandonment precondition
+ * failure: an owner-scoped Catch Record exists, but it is not (or is no longer) a never-submitted
+ * `DRAFT`. Reuses the existing (Step 03) `INVALID_LIFECYCLE_TRANSITION` category — no new category is
+ * added. Never includes the record ID, owner ID, or its current status/submission state.
+ *
+ * @returns {ApplicationError}
+ */
+export function ineligibleAbandonmentError() {
+  return new ApplicationError({
+    category: 'INVALID_LIFECYCLE_TRANSITION',
+    code: 'CATCH_RECORD_ABANDONMENT_INELIGIBLE',
+    message: 'Only a never-submitted draft catch record may be abandoned.'
+  })
+}
+
+/**
  * Builds the safe, deterministic `ApplicationError` for an optimistic-concurrency conflict: an
  * owner-scoped Catch Record exists, but its stored `version` no longer matches the caller's supplied
  * expected version. Reuses the existing (Step 03) `VERSION_CONFLICT` category — no new category is

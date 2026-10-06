@@ -163,7 +163,9 @@ describe('#architecture-boundary (persistence)', () => {
 
     expect(exportedFunctionNames.sort()).toEqual([
       'applyAuditMetadataUpdate',
+      'applySectionUpdate',
       'createCatchRecord',
+      'deleteEligibleDraftForOwner',
       'ensureCatchRecordIndexes',
       'findCatchRecordByIdForOwner',
       'findCatchRecordByReference',
