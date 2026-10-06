@@ -41,7 +41,7 @@ const ALLOWED_METADATA_SECTIONS = Object.freeze([
   'trip',
   'pairFishing',
   'gears',
-  'landing',
+  'speciesNotLanded',
   'artifacts'
 ])
 

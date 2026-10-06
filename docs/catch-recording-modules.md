@@ -94,7 +94,7 @@ replacement of a committed historical artifact.
 
 Accepts an immutable canonical submission snapshot and produces the version-specific receipt: generates
 content only from the supplied snapshot, includes the approved Catch Record/vessel/trip/gear/area/
-species/landing/submission/status information, returns PDF content and generation metadata, applies
+species/species-not-landed/submission/status information, returns PDF content and generation metadata, applies
 content-size and rendering-safety controls.
 
 **Excluded:** loading mutable database state or unapproved remote content during generation.

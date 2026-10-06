@@ -9,13 +9,18 @@ import {
 
 const FORBIDDEN_ARTIFACT_BODY_FIELDS = ['content', 'body', 'json', 'pdf']
 const INVALID_STRUCTURE_MESSAGE = 'Invalid structure'
-// Root-level fields that must never appear on a Catch Record: statistical area and species always
+// The two approved `weightPrecision` values (Step 27 redesign - service-owner decision). No other
+// value is approved; do not infer a third precision level.
+const WEIGHT_PRECISION_VALUES = ['wholeNumber', 'oneDecimalPlace']
+// Root-level fields that must never appear on a Catch Record: landed species/statistical area always
 // belong to a gear association, never the root, and history is a separate append-only mechanism.
+// `speciesNotLanded` is the one approved exception (Step 27 redesign, service-owner decision): it is a
+// single, trip-level, root collection - not landed, so not tied to any one gear.
 const FORBIDDEN_ROOT_FIELDS = Object.freeze({
   statisticalArea:
     'Statistical area must belong to a gear association, not the Catch Record root',
   speciesCaught:
-    'Species must belong to a gear association, not the Catch Record root',
+    'Landed species must belong to a gear association, not the Catch Record root',
   history: 'History must not be embedded',
   events: 'History must not be embedded'
 })
@@ -81,46 +86,61 @@ function validateCharacteristic(characteristic, pathSegments) {
   return validateElementShape(characteristic, pathSegments)
 }
 
-function validateCatchDetail(catchDetail, pathSegments) {
-  return validateElementShape(catchDetail, pathSegments)
+function isNullableFiniteNumber(value) {
+  return value === null || (typeof value === 'number' && Number.isFinite(value))
 }
 
-function validateSpeciesAssociation(speciesAssociation, pathSegments) {
-  const issues = validateElementShape(speciesAssociation, pathSegments)
+/**
+ * Validates one species-caught-or-not-landed entry's structural shape only (Step 27 redesign):
+ * nullable-finite-number weight fields and an approved `weightPrecision`. Shared by both the per-gear
+ * `speciesCaught` collection and the root-level `speciesNotLanded` collection, since both use the
+ * identical entry shape. Deliberately does **not** require `id` here - exactly like `gear.id` is never
+ * required by this structural layer (see `validateGearAssociation`, which checks only the gear's own
+ * stable `associationId`), authoritative-reference requiredness is a section-validator business concern
+ * (`validateSpeciesCaught`/`validateSpeciesNotLanded`), not a structural one. Species no longer has a
+ * separate synthetic relationship `associationId` to check structurally at all.
+ *
+ * @param {unknown} speciesEntry
+ * @param {Array<string|number>} pathSegments
+ * @returns {ReadonlyArray<object>}
+ */
+function validateSpeciesEntry(speciesEntry, pathSegments) {
+  const issues = validateElementShape(speciesEntry, pathSegments)
   if (issues.length > 0) {
     return issues
   }
 
-  if (!isNonEmptyString(speciesAssociation.associationId)) {
-    issues.push(
-      issue(
-        VALIDATION_CODES.REQUIRED,
-        [...pathSegments, 'associationId'],
-        'Required'
+  for (const field of [
+    'weightAboveMinimumKg',
+    'weightBelowMinimumKg',
+    'weightLegallyDiscardedKg'
+  ]) {
+    if (
+      Object.hasOwn(speciesEntry, field) &&
+      !isNullableFiniteNumber(speciesEntry[field])
+    ) {
+      issues.push(
+        issue(
+          VALIDATION_CODES.INVALID_STRUCTURE,
+          [...pathSegments, field],
+          INVALID_STRUCTURE_MESSAGE
+        )
       )
-    )
+    }
   }
 
-  issues.push(
-    ...validateContainerShape(
-      speciesAssociation.catchDetails,
-      [...pathSegments, 'catchDetails'],
-      {
-        allowArray: true
-      }
-    )
-  )
-
-  if (Array.isArray(speciesAssociation.catchDetails)) {
-    speciesAssociation.catchDetails.forEach((catchDetail, index) => {
-      issues.push(
-        ...validateCatchDetail(catchDetail, [
-          ...pathSegments,
-          'catchDetails',
-          index
-        ])
+  if (
+    Object.hasOwn(speciesEntry, 'weightPrecision') &&
+    speciesEntry.weightPrecision !== null &&
+    !WEIGHT_PRECISION_VALUES.includes(speciesEntry.weightPrecision)
+  ) {
+    issues.push(
+      issue(
+        VALIDATION_CODES.UNSUPPORTED_VALUE,
+        [...pathSegments, 'weightPrecision'],
+        'Unsupported weight precision'
       )
-    })
+    )
   }
 
   return issues
@@ -180,13 +200,31 @@ function validateGearAssociation(gearAssociation, pathSegments) {
     )
   )
   if (Array.isArray(gearAssociation.speciesCaught)) {
-    gearAssociation.speciesCaught.forEach((speciesAssociation, index) => {
+    gearAssociation.speciesCaught.forEach((speciesEntry, index) => {
       issues.push(
-        ...validateSpeciesAssociation(speciesAssociation, [
+        ...validateSpeciesEntry(speciesEntry, [
           ...pathSegments,
           'speciesCaught',
           index
         ])
+      )
+    })
+  }
+
+  return issues
+}
+
+function validateSpeciesNotLandedCollection(catchRecord) {
+  const issues = validateContainerShape(
+    catchRecord.speciesNotLanded,
+    ['speciesNotLanded'],
+    { allowArray: true }
+  )
+
+  if (Array.isArray(catchRecord.speciesNotLanded)) {
+    catchRecord.speciesNotLanded.forEach((speciesEntry, index) => {
+      issues.push(
+        ...validateSpeciesEntry(speciesEntry, ['speciesNotLanded', index])
       )
     })
   }
@@ -289,9 +327,10 @@ function validateGearsCollection(catchRecord) {
 /**
  * Validates the canonical structural shape of a Catch Record (or a partial canonical input, since
  * completeness is never required here — only shape-if-present). Enforces the canonical hierarchy: no
- * root-level `statisticalArea` or `speciesCaught`, and every nested gear/species/catch-detail entry
- * nested in its correct place. Does not implement submission-readiness completeness, reference-data
- * validity, or lifecycle eligibility.
+ * root-level `statisticalArea` or landed `speciesCaught` (both always nested under a gear association),
+ * while `speciesNotLanded` is the one approved root-level species collection (Step 27 redesign — it is a
+ * single, trip-level list, not tied to any one gear). Does not implement submission-readiness
+ * completeness, reference-data validity, or lifecycle eligibility.
  *
  * @param {unknown} catchRecord
  * @returns {{ valid: boolean, issues: ReadonlyArray<object> }}
@@ -305,7 +344,7 @@ export function validateStructure(catchRecord) {
 
   const issues = [...validateRootEnumFields(catchRecord)]
 
-  for (const field of ['vessel', 'trip', 'pairFishing', 'landing']) {
+  for (const field of ['vessel', 'trip', 'pairFishing']) {
     issues.push(
       ...validateContainerShape(catchRecord[field], [field], {
         allowObject: true
@@ -316,6 +355,7 @@ export function validateStructure(catchRecord) {
   issues.push(
     ...validateForbiddenRootFields(catchRecord),
     ...validateGearsCollection(catchRecord),
+    ...validateSpeciesNotLandedCollection(catchRecord),
     ...validateArtifacts(catchRecord.artifacts)
   )
 

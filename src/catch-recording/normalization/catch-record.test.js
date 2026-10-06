@@ -11,7 +11,7 @@ function clientPayloadFrom(fixture) {
     trip: fixture.trip,
     pairFishing: fixture.pairFishing,
     gears: fixture.gears,
-    landing: fixture.landing,
+    speciesNotLanded: fixture.speciesNotLanded,
     // Attempted server-owned-field overrides - none of these must reach output.
     schemaVersion: 999,
     id: 'attacker-supplied-id',
@@ -42,7 +42,7 @@ describe('#normaliseCatchRecord', () => {
     expect(result).toHaveProperty('trip')
     expect(result).toHaveProperty('pairFishing')
     expect(result).toHaveProperty('gears')
-    expect(result).toHaveProperty('landing')
+    expect(result).toHaveProperty('speciesNotLanded')
     expect(result.vessel).toEqual({ id: newDraftExample.vessel.id })
   })
 
@@ -118,7 +118,7 @@ describe('#normaliseCatchRecord', () => {
     expect(result.gears[0].characteristics).not.toBe(
       payload.gears[0].characteristics
     )
-    expect(result.landing).not.toBe(payload.landing)
+    expect(result.speciesNotLanded).not.toBe(payload.speciesNotLanded)
     expect(result.trip.departurePort).not.toBe(payload.trip.departurePort)
   })
 

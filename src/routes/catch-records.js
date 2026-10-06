@@ -64,11 +64,21 @@ async function abandonDraftCatchRecordHandler(request, h) {
   return h.response().code(HTTP_STATUS_NO_CONTENT)
 }
 
+// `gears` and `speciesNotLanded` are collection-valued sections (Step 23 / Step 27 redesign): their
+// `data` is an ordered array, while every other approved section's `data` is a single nested object. The
+// conditional keeps both transport shapes validated explicitly - a malformed `data` shape for the given
+// `section` is rejected here with a safe 400, before the handler/normaliser ever sees it.
+const ARRAY_VALUED_SECTIONS = ['gears', 'speciesNotLanded']
+
 const sectionPatchPayloadSchema = Joi.object({
   section: Joi.string()
     .valid(...SECTION_ALLOW_LIST)
     .required(),
-  data: Joi.object().unknown(true).required()
+  data: Joi.when('section', {
+    is: Joi.valid(...ARRAY_VALUED_SECTIONS),
+    then: Joi.array().items(Joi.object().unknown(true)).required(),
+    otherwise: Joi.object().unknown(true).required()
+  })
 }).required()
 
 async function saveCatchRecordSectionHandler(request, h) {

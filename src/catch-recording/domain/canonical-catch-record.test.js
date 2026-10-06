@@ -62,34 +62,23 @@ describe('#canonical-catch-record', () => {
       expect(fixture).not.toHaveProperty('speciesCaught')
     })
 
-    test('Should nest statistical area, species, and catch details under their gear association', () => {
+    test('Should nest statistical area and species beneath each gear association', () => {
       for (const gearAssociation of fixture.gears) {
         expect(gearAssociation).toHaveProperty('associationId')
         expect(gearAssociation).toHaveProperty('statisticalArea')
         expect(Array.isArray(gearAssociation.speciesCaught)).toBe(true)
 
-        for (const speciesAssociation of gearAssociation.speciesCaught) {
-          expect(speciesAssociation).toHaveProperty('associationId')
-          expect(Array.isArray(speciesAssociation.catchDetails)).toBe(true)
+        for (const speciesEntry of gearAssociation.speciesCaught) {
+          expect(speciesEntry).toHaveProperty('id')
         }
       }
     })
 
-    test('Should reference an existing gear and species association from every retained species entry', () => {
-      const gearAssociationIds = new Set(
-        fixture.gears.map((gear) => gear.associationId)
-      )
-      const speciesAssociationIds = new Set(
-        fixture.gears.flatMap((gear) =>
-          gear.speciesCaught.map((species) => species.associationId)
-        )
-      )
+    test('Should keep speciesNotLanded independent of every gear association', () => {
+      expect(Array.isArray(fixture.speciesNotLanded)).toBe(true)
 
-      for (const retained of fixture.landing.retainedSpecies) {
-        expect(gearAssociationIds.has(retained.gearAssociationId)).toBe(true)
-        expect(speciesAssociationIds.has(retained.speciesAssociationId)).toBe(
-          true
-        )
+      for (const speciesEntry of fixture.speciesNotLanded) {
+        expect(speciesEntry).toHaveProperty('id')
       }
     })
 

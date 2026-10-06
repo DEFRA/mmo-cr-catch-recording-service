@@ -226,6 +226,101 @@ function eligibleDraftDocument(overrides = {}) {
   }
 }
 
+function gearCollectionResponse({
+  gearId = 'gear-1',
+  characteristicId = 'char-1',
+  active = true
+} = {}) {
+  return {
+    items: [
+      {
+        id: gearId,
+        code: 'GEAR001',
+        name: 'Otter trawl',
+        type: 'trawl',
+        categoryId: 'cat-1',
+        pairFishing: false,
+        active,
+        applicableCharacteristics: [
+          {
+            id: 'applicable-1',
+            characteristicId,
+            fixed: false,
+            required: true,
+            vesselLengthApplicability: []
+          }
+        ]
+      }
+    ],
+    characteristics: [
+      {
+        id: characteristicId,
+        code: 'MESH',
+        name: 'Mesh size',
+        dataType: 'number',
+        unit: 'mm',
+        minValue: 0,
+        maxValue: 300
+      }
+    ]
+  }
+}
+
+function gearNotFoundResponse() {
+  return { items: [], characteristics: [] }
+}
+
+function statisticalAreaFeatureResponse({
+  id = 'area-2',
+  code = '46F45',
+  name = 'ICES 46F45'
+} = {}) {
+  return {
+    type: 'Feature',
+    properties: { id, code, name, areaType: 'ICES' },
+    geometry: { type: 'Point', coordinates: [0, 0] }
+  }
+}
+
+function speciesResponse({
+  id = 'species-2',
+  faoCode = 'HAD',
+  scientificName = 'Melanogrammus aeglefinus',
+  commonName = 'Haddock',
+  active = true
+} = {}) {
+  return {
+    id,
+    faoCode,
+    scientificName,
+    commonNames: [{ id: 'cn-1', countryCode: 'GB', name: commonName }],
+    localNames: [],
+    active
+  }
+}
+
+function existingGear(overrides = {}) {
+  return {
+    associationId: 'gear-assoc-1',
+    gear: { id: 'gear-1', codeSnapshot: 'OLD_CODE', nameSnapshot: 'Old Name' },
+    characteristics: [],
+    statisticalArea: {
+      id: 'area-1',
+      codeSnapshot: 'A1',
+      nameSnapshot: 'Area One'
+    },
+    speciesCaught: [
+      {
+        id: 'species-1',
+        faoCodeSnapshot: 'COD',
+        nameSnapshot: 'Cod',
+        weightAboveMinimumKg: 5
+      }
+    ],
+    ...overrides
+  }
+}
+
 describe('DELETE /v1/catch-records/{catchRecordId}', () => {
   test('abandons an eligible draft and returns 204', async () => {
     const { server, db } = await createTestServer()
@@ -409,6 +504,22 @@ describe('PATCH /v1/catch-records/{catchRecordId}', () => {
       method: 'PATCH',
       url: '/v1/catch-records/record-1',
       headers: { authorization: 'Bearer token-1', 'if-match': '1' },
+      payload: { section: 'notASupportedSection', data: {} }
+    })
+
+    expect(response.statusCode).toBe(400)
+  })
+
+  test('rejects a malformed (non-array) gears payload with 400', async () => {
+    const { server } = await createTestServer()
+    fetchMock.mockResponseOnce(
+      JSON.stringify({ actorId: 'owner-1', permissions: [] })
+    )
+
+    const response = await server.inject({
+      method: 'PATCH',
+      url: '/v1/catch-records/record-1',
+      headers: { authorization: 'Bearer token-1', 'if-match': '1' },
       payload: { section: 'gears', data: {} }
     })
 
@@ -495,5 +606,345 @@ describe('PATCH /v1/catch-records/{catchRecordId}', () => {
     })
 
     expect(response.statusCode).toBe(422)
+  })
+
+  test('saves a new gear occurrence, generating a stable associationId', async () => {
+    const { server, db } = await createTestServer()
+    db.collections['catch-records'].seed(eligibleDraftDocument())
+    fetchMock.mockResponseOnce(
+      JSON.stringify({ actorId: 'owner-1', permissions: [] })
+    )
+    fetchMock.mockResponseOnce(JSON.stringify(gearCollectionResponse()))
+
+    const response = await server.inject({
+      method: 'PATCH',
+      url: '/v1/catch-records/record-1',
+      headers: { authorization: 'Bearer token-1', 'if-match': '1' },
+      payload: {
+        section: 'gears',
+        data: [
+          {
+            gear: { id: 'gear-1' },
+            characteristics: [{ characteristicId: 'char-1', value: 80 }]
+          }
+        ]
+      }
+    })
+
+    expect(response.statusCode).toBe(200)
+    const body = JSON.parse(response.payload)
+    expect(body.savedSection).toBe('gears')
+    expect(body.version).toBe(2)
+
+    const updateCall =
+      db.collections['catch-records'].findOneAndUpdate.mock.calls[0][1].$set
+    expect(updateCall.gears).toHaveLength(1)
+    expect(typeof updateCall.gears[0].associationId).toBe('string')
+    expect(updateCall.gears[0].associationId.length).toBeGreaterThan(0)
+    expect(updateCall.gears[0].gear).toEqual({
+      id: 'gear-1',
+      codeSnapshot: 'GEAR001',
+      nameSnapshot: 'Otter trawl'
+    })
+    expect(updateCall.gears[0].speciesCaught).toEqual([])
+  })
+
+  test('retains an existing gear occurrence, preserving its nested dependent data', async () => {
+    const { server, db } = await createTestServer()
+    db.collections['catch-records'].seed(
+      eligibleDraftDocument({ gears: [existingGear()] })
+    )
+    fetchMock.mockResponseOnce(
+      JSON.stringify({ actorId: 'owner-1', permissions: [] })
+    )
+    fetchMock.mockResponseOnce(JSON.stringify(gearCollectionResponse()))
+
+    const response = await server.inject({
+      method: 'PATCH',
+      url: '/v1/catch-records/record-1',
+      headers: { authorization: 'Bearer token-1', 'if-match': '1' },
+      payload: {
+        section: 'gears',
+        data: [
+          {
+            associationId: 'gear-assoc-1',
+            gear: { id: 'gear-1' },
+            characteristics: []
+          }
+        ]
+      }
+    })
+
+    expect(response.statusCode).toBe(200)
+    const updateCall =
+      db.collections['catch-records'].findOneAndUpdate.mock.calls[0][1].$set
+    expect(updateCall.gears).toHaveLength(1)
+    expect(updateCall.gears[0].associationId).toBe('gear-assoc-1')
+    expect(updateCall.gears[0].gear.codeSnapshot).toBe('GEAR001')
+    expect(updateCall.gears[0].statisticalArea).toEqual(
+      existingGear().statisticalArea
+    )
+    expect(updateCall.gears[0].speciesCaught).toEqual(
+      existingGear().speciesCaught
+    )
+  })
+
+  test('drops a deselected gear occurrence, cascading its nested dependent data', async () => {
+    const { server, db } = await createTestServer()
+    db.collections['catch-records'].seed(
+      eligibleDraftDocument({
+        gears: [
+          existingGear({ associationId: 'gear-assoc-1' }),
+          existingGear({
+            associationId: 'gear-assoc-2',
+            gear: { id: 'gear-2', codeSnapshot: 'G2', nameSnapshot: 'Gear 2' }
+          })
+        ]
+      })
+    )
+    fetchMock.mockResponseOnce(
+      JSON.stringify({ actorId: 'owner-1', permissions: [] })
+    )
+    fetchMock.mockResponseOnce(JSON.stringify(gearCollectionResponse()))
+
+    const response = await server.inject({
+      method: 'PATCH',
+      url: '/v1/catch-records/record-1',
+      headers: { authorization: 'Bearer token-1', 'if-match': '1' },
+      payload: {
+        section: 'gears',
+        data: [
+          {
+            associationId: 'gear-assoc-1',
+            gear: { id: 'gear-1' },
+            characteristics: []
+          }
+        ]
+      }
+    })
+
+    expect(response.statusCode).toBe(200)
+    const updateCall =
+      db.collections['catch-records'].findOneAndUpdate.mock.calls[0][1].$set
+    expect(updateCall.gears).toHaveLength(1)
+    expect(updateCall.gears[0].associationId).toBe('gear-assoc-1')
+  })
+
+  test('Step 24: sets a statistical area under the target gear and returns 200', async () => {
+    const { server, db } = await createTestServer()
+    db.collections['catch-records'].seed(
+      eligibleDraftDocument({ gears: [existingGear()] })
+    )
+    fetchMock.mockResponseOnce(
+      JSON.stringify({ actorId: 'owner-1', permissions: [] })
+    )
+    fetchMock.mockResponseOnce(JSON.stringify(gearCollectionResponse()))
+    fetchMock.mockResponseOnce(JSON.stringify(statisticalAreaFeatureResponse()))
+
+    const response = await server.inject({
+      method: 'PATCH',
+      url: '/v1/catch-records/record-1',
+      headers: { authorization: 'Bearer test-token-1', 'if-match': '1' },
+      payload: {
+        section: 'gears',
+        data: [
+          {
+            associationId: 'gear-assoc-1',
+            gear: { id: 'gear-1' },
+            characteristics: [],
+            statisticalArea: { id: 'area-2' }
+          }
+        ]
+      }
+    })
+
+    expect(response.statusCode).toBe(200)
+    const updateCall =
+      db.collections['catch-records'].findOneAndUpdate.mock.calls[0][1].$set
+    expect(updateCall.gears[0].statisticalArea).toEqual({
+      id: 'area-2',
+      codeSnapshot: '46F45',
+      nameSnapshot: 'ICES 46F45'
+    })
+  })
+
+  test('Step 24: rejects an invalid/not-found statistical area with a safe 422', async () => {
+    const { server, db } = await createTestServer()
+    db.collections['catch-records'].seed(eligibleDraftDocument())
+    fetchMock.mockResponseOnce(
+      JSON.stringify({ actorId: 'owner-1', permissions: [] })
+    )
+    fetchMock.mockResponseOnce(JSON.stringify(gearCollectionResponse()))
+    fetchMock.mockResponseOnce(JSON.stringify({ status: 404 }), {
+      status: 404
+    })
+
+    const response = await server.inject({
+      method: 'PATCH',
+      url: '/v1/catch-records/record-1',
+      headers: { authorization: 'Bearer test-token-1', 'if-match': '1' },
+      payload: {
+        section: 'gears',
+        data: [{ gear: { id: 'gear-1' }, statisticalArea: { id: 'missing' } }]
+      }
+    })
+
+    expect(response.statusCode).toBe(422)
+  })
+
+  test('Step 27: adds a new species entry with weight fields and returns 200', async () => {
+    const { server, db } = await createTestServer()
+    db.collections['catch-records'].seed(
+      eligibleDraftDocument({
+        gears: [existingGear({ speciesCaught: [] })]
+      })
+    )
+    fetchMock.mockResponseOnce(
+      JSON.stringify({ actorId: 'owner-1', permissions: [] })
+    )
+    fetchMock.mockResponseOnce(JSON.stringify(gearCollectionResponse()))
+    fetchMock.mockResponseOnce(JSON.stringify(speciesResponse()))
+
+    const response = await server.inject({
+      method: 'PATCH',
+      url: '/v1/catch-records/record-1',
+      headers: { authorization: 'Bearer token-1', 'if-match': '1' },
+      payload: {
+        section: 'gears',
+        data: [
+          {
+            associationId: 'gear-assoc-1',
+            gear: { id: 'gear-1' },
+            characteristics: [],
+            speciesCaught: [
+              {
+                id: 'species-2',
+                weightAboveMinimumKg: 5,
+                weightPrecision: 'wholeNumber'
+              }
+            ]
+          }
+        ]
+      }
+    })
+
+    expect(response.statusCode).toBe(200)
+    const updateCall =
+      db.collections['catch-records'].findOneAndUpdate.mock.calls[0][1].$set
+    const speciesCaught = updateCall.gears[0].speciesCaught
+    expect(speciesCaught).toEqual([
+      {
+        id: 'species-2',
+        faoCodeSnapshot: 'HAD',
+        nameSnapshot: 'Haddock',
+        weightAboveMinimumKg: 5,
+        weightPrecision: 'wholeNumber'
+      }
+    ])
+  })
+
+  test('Step 27: rejects a species that cannot be resolved with a safe 422', async () => {
+    const { server, db } = await createTestServer()
+    db.collections['catch-records'].seed(
+      eligibleDraftDocument({ gears: [existingGear({ speciesCaught: [] })] })
+    )
+    fetchMock.mockResponseOnce(
+      JSON.stringify({ actorId: 'owner-1', permissions: [] })
+    )
+    fetchMock.mockResponseOnce(JSON.stringify(gearCollectionResponse()))
+    fetchMock.mockResponseOnce(JSON.stringify({ status: 404 }), {
+      status: 404
+    })
+
+    const response = await server.inject({
+      method: 'PATCH',
+      url: '/v1/catch-records/record-1',
+      headers: { authorization: 'Bearer token-1', 'if-match': '1' },
+      payload: {
+        section: 'gears',
+        data: [
+          {
+            associationId: 'gear-assoc-1',
+            gear: { id: 'gear-1' },
+            characteristics: [],
+            speciesCaught: [{ id: 'missing-species' }]
+          }
+        ]
+      }
+    })
+
+    expect(response.statusCode).toBe(422)
+  })
+
+  test('rejects a gear that cannot be resolved with a safe 422', async () => {
+    const { server, db } = await createTestServer()
+    db.collections['catch-records'].seed(eligibleDraftDocument())
+    fetchMock.mockResponseOnce(
+      JSON.stringify({ actorId: 'owner-1', permissions: [] })
+    )
+    fetchMock.mockResponseOnce(JSON.stringify(gearNotFoundResponse()))
+
+    const response = await server.inject({
+      method: 'PATCH',
+      url: '/v1/catch-records/record-1',
+      headers: { authorization: 'Bearer token-1', 'if-match': '1' },
+      payload: { section: 'gears', data: [{ gear: { id: 'missing-gear' } }] }
+    })
+
+    expect(response.statusCode).toBe(422)
+  })
+
+  test('rejects a stale expected version for gears with 409', async () => {
+    const { server, db } = await createTestServer()
+    db.collections['catch-records'].seed(eligibleDraftDocument({ version: 2 }))
+    fetchMock.mockResponseOnce(
+      JSON.stringify({ actorId: 'owner-1', permissions: [] })
+    )
+
+    const response = await server.inject({
+      method: 'PATCH',
+      url: '/v1/catch-records/record-1',
+      headers: { authorization: 'Bearer token-1', 'if-match': '1' },
+      payload: { section: 'gears', data: [] }
+    })
+
+    expect(response.statusCode).toBe(409)
+  })
+
+  test('rejects a missing catch record for gears with 404', async () => {
+    const { server } = await createTestServer()
+    fetchMock.mockResponseOnce(
+      JSON.stringify({ actorId: 'owner-1', permissions: [] })
+    )
+
+    const response = await server.inject({
+      method: 'PATCH',
+      url: '/v1/catch-records/does-not-exist',
+      headers: { authorization: 'Bearer token-1', 'if-match': '1' },
+      payload: { section: 'gears', data: [] }
+    })
+
+    expect(response.statusCode).toBe(404)
+  })
+
+  test('leaves unrelated fields unchanged when saving gears', async () => {
+    const { server, db } = await createTestServer()
+    db.collections['catch-records'].seed(eligibleDraftDocument())
+    fetchMock.mockResponseOnce(
+      JSON.stringify({ actorId: 'owner-1', permissions: [] })
+    )
+    fetchMock.mockResponseOnce(JSON.stringify(gearCollectionResponse()))
+
+    await server.inject({
+      method: 'PATCH',
+      url: '/v1/catch-records/record-1',
+      headers: { authorization: 'Bearer token-1', 'if-match': '1' },
+      payload: { section: 'gears', data: [{ gear: { id: 'gear-1' } }] }
+    })
+
+    const updateCall =
+      db.collections['catch-records'].findOneAndUpdate.mock.calls[0][1].$set
+    expect(updateCall.trip).toBeUndefined()
+    expect(updateCall.vessel).toBeUndefined()
   })
 })

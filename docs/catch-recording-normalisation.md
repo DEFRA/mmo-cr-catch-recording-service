@@ -13,16 +13,16 @@ consistently?"_ — not _"is it valid?"_ (that is Step 07's reusable validation)
 is accepted?"_ (that is Joi, at the route boundary). CatchNormalization is framework-neutral: no file
 imports Hapi, Boom, Joi, or MongoDB (verified by `architecture-boundary.test.js` and a manual `grep`).
 
-| File                       | Exports                                                                                                                             |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `primitives.js`            | `normaliseTrimmedString(value)` — the one approved primitive transformation                                                         |
-| `object-helpers.js`        | `copyField`, `normaliseReferenceSelection`, `normaliseArray` — the shared explicit-allow-list building blocks every normaliser uses |
-| `sections/vessel.js`       | `normaliseVesselSelection(input)` → `{ id }`                                                                                        |
-| `sections/trip.js`         | `normaliseTrip(input)`                                                                                                              |
-| `sections/pair-fishing.js` | `normalisePairFishing(input)`                                                                                                       |
-| `sections/gears.js`        | `normaliseGears(input)` — the per-gear hierarchy                                                                                    |
-| `sections/landing.js`      | `normaliseLanding(input)`                                                                                                           |
-| `catch-record.js`          | `normaliseCatchRecord(input)` — composes every section above                                                                        |
+| File                             | Exports                                                                                                                             |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `primitives.js`                  | `normaliseTrimmedString(value)` — the one approved primitive transformation                                                         |
+| `object-helpers.js`              | `copyField`, `normaliseReferenceSelection`, `normaliseArray` — the shared explicit-allow-list building blocks every normaliser uses |
+| `sections/vessel.js`             | `normaliseVesselSelection(input)` → `{ id }`                                                                                        |
+| `sections/trip.js`               | `normaliseTrip(input)`                                                                                                              |
+| `sections/pair-fishing.js`       | `normalisePairFishing(input)`                                                                                                       |
+| `sections/gears.js`              | `normaliseGears(input)` — the per-gear hierarchy                                                                                    |
+| `sections/species-not-landed.js` | `normaliseSpeciesNotLanded(input)` — the root-level, trip-level collection                                                          |
+| `catch-record.js`                | `normaliseCatchRecord(input)` — composes every section above                                                                        |
 
 ## The one policy: explicit allow-listing, never spreading
 
@@ -39,22 +39,23 @@ an input object into output. A field not on a normaliser's allow-list is **omitt
 This single mechanism satisfies "unknown fields must not silently enter canonical output" and
 "server-owned fields cannot be overwritten" identically, with no second competing rejection pathway.
 `normaliseCatchRecord`'s output can only ever contain the five approved client-owned sections (`vessel`,
-`trip`, `pairFishing`, `gears`, `landing`) — a server-owned root key is never even read from input.
+`trip`, `pairFishing`, `gears`, `speciesNotLanded`) — a server-owned root key is never even read from
+input.
 
 ## No silent correction
 
 Only whitespace-trimming is performed on string values. No type coercion, date reformatting, default
 substitution, or hierarchy repair happens. A malformed collection (e.g. `gears` sent as a string) is
 passed through **unchanged** rather than coerced to `[]`, so the invalidity remains detectable by Step 07
-instead of being hidden. Association IDs (`associationId`, `speciesAssociationId`) are preserved if
-supplied and never generated, inferred, or replaced.
+instead of being hidden. Gear `associationId` is preserved if supplied and never generated, inferred, or
+replaced. Species entries (`gears[].speciesCaught[]`, root-level `speciesNotLanded[]`) have no
+association identity of their own — a species' own `id` is its natural key.
 
 ## Deep immutability
 
-Every level a normaliser touches (gear, characteristic, statistical area, species association, catch
-detail, retained species, ports) is rebuilt as a new plain object/array. No level reuses a nested
-input object/array reference, so mutating normalised output can never affect the original input, and no
-deep-clone dependency was needed.
+Every level a normaliser touches (gear, characteristic, statistical area, species entry, ports) is
+rebuilt as a new plain object/array. No level reuses a nested input object/array reference, so mutating
+normalised output can never affect the original input, and no deep-clone dependency was needed.
 
 ## Determinism and ordering
 
@@ -70,11 +71,8 @@ returns `null` (explicit absence preserved). Neither is converted to a default o
 ## Explicitly deferred (not implemented here)
 
 - Reference Data Service validation and snapshot resolution (Step 15/16).
-- Exact species catch-detail rules (Step 25); exact landing-intention values and `retainedSpecies`/
-  `notLandingDetails` semantics (Step 27) — the known `NOT_LANDING` + populated `retainedSpecies`
-  inconsistency flagged by the canonical doc is deliberately **not** repaired here.
-- Reconciling `retainedSpecies` references against the gear/species associations actually present in the
-  same Catch Record — that is validation/business-logic, not normalisation.
+- Weight-field/`weightPrecision` type and enum validation (Step 25/27's gear and species-not-landed
+  validators) — normalisation only trims strings and never coerces or rejects a value.
 - Mobile complete-replacement orchestration (Step 30); persistence mapping; ID/association-ID
   generation; lifecycle and submission behaviour.
 

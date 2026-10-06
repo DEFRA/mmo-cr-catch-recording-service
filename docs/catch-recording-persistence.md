@@ -52,9 +52,9 @@ and a duplicate internal ID fails deterministically via that existing uniqueness
 
 Both `toPersistenceDocument` and `toCanonicalRecord` assign every one of the Step 05 canonical contract's
 22 root fields explicitly by name — never an object spread of either the canonical input or the raw
-stored document. Nested structures (`vessel`, `trip`, `pairFishing`, `gears`, `landing`, `artifacts`) are
-deep-cloned (`structuredClone`) in both directions, so neither mapping shares a mutable reference with its
-input, and the caller's own object is never mutated.
+stored document. Nested structures (`vessel`, `trip`, `pairFishing`, `gears`, `speciesNotLanded`,
+`artifacts`) are deep-cloned (`structuredClone`) in both directions, so neither mapping shares a mutable
+reference with its input, and the caller's own object is never mutated.
 
 `toCanonicalRecord` fails safely (throws, translated by the caller into `malformedDocumentError` —
 `UNEXPECTED_INTERNAL_FAILURE`/`MALFORMED_CATCH_RECORD_DOCUMENT`, never exposing the stored document) when
@@ -291,9 +291,47 @@ database name, connection string, query/update document, or stored record conten
   `{ $where: '...' }`, or a regular-expression object substituted for a scalar filter value.
 - `assertAllowedChanges` rejects any key not on the fixed allow-list (and defensively rejects
   `__proto__`/`constructor`/`prototype`, belt-and-braces against prototype pollution).
+- `assertSectionChanges`'s `assertSectionValueIsPlainObject` accepts a section value that is either a
+  plain object (`trip`, `pairFishing`) or an array (`gears` — the first collection-valued section,
+  approved by Step 23, Phase 6). `null` and any scalar are still rejected outright, and a plain-object
+  section value is still rejected if it carries an own `__proto__`/`constructor`/`prototype` key,
+  defensively. `gears` is added to the generic section-PATCH pipeline's `SECTION_ALLOW_LIST`
+  (`save-catch-record-section.js`) alongside `trip`/`pairFishing` — the PATCH request's accepted
+  `section` values, per-section `data` shape (object vs. array, enforced at the Joi transport boundary),
+  and standard save response are otherwise unchanged. Step 23's `gears` save additionally reads the
+  currently persisted record (`findCatchRecordByIdForOwner`) to source existing gear identities/nested
+  dependent data for reconciliation only — the atomic `{_id, ownerUserId, version}` predicate on the
+  write remains the sole concurrency control.
 - `expected-version.js`'s `validateExpectedVersion` rejects anything that is not a safe-integer `number`
   `>= 1` — including an operator-like structure such as `{ $gt: 0 }` — before `expectedVersion` ever
   reaches the atomic predicate.
+- Step 24 (Phase 6) extends the `gears` section save with a per-gear, optional, nullable
+  `statisticalArea`: an incoming gear entry with no `statisticalArea` key leaves that gear's current
+  statistical area unchanged, an entry with `statisticalArea: null` clears it, and an entry with a
+  `{ id }` object resolves and replaces it — all re-resolved fresh from the Reference Data Service, never
+  trusting a client-supplied snapshot. Every other gear association in the same save is left deeply
+  unchanged; the single atomic `{_id, ownerUserId, version}` write predicate remains unchanged and is
+  still the sole concurrency control.
+- Step 25/27 (Phase 6, redesigned) extends the `gears` section save one level further, to each gear's
+  `speciesCaught` collection. An incoming gear entry with no `speciesCaught` key leaves that gear's
+  current species collection unchanged; an entry that owns the key (even as an empty or `null` array) is
+  treated as the authoritative full species list for that gear in this save and replaces it wholesale —
+  no reconciliation step is needed, because a species entry's own `id` (the authoritative species
+  reference ID) is its natural key and there is no synthetic species-level `associationId` to retain or
+  re-mint, exactly mirroring how gear `characteristics` have always been rebuilt from scratch on every
+  save. Each species selection is resolved fresh from the Reference Data Service
+  (`resolve-species-caught.js`); only the approved slim snapshot (`faoCodeSnapshot`/`nameSnapshot`) and
+  the supplied weight fields/`weightPrecision` survive — never a client-supplied snapshot. The same
+  authoritative species may exist independently under different gears; the same species is rejected if
+  selected twice under the _same_ gear's `speciesCaught`. No "required weight present" or "at least one
+  species" completeness rule is enforced at save time — that is Step 26's domain-progress concern.
+- Step 27's redesign also adds a root-level, trip-level `speciesNotLanded` section to the same generic
+  section-PATCH pipeline (`ARRAY_VALUED_SECTIONS` in `src/routes/catch-records.js`), identical in entry
+  shape to a gear's `speciesCaught` but **not** tied to any gear and **not** reconciled against existing
+  state — like `trip`, a save simply resolves every supplied entry fresh from the Reference Data Service
+  (`resolve-species-not-landed.js`) and overwrites the collection wholesale; no prior read of the
+  persisted record is needed for this section. It is the one approved exception to the "no root-level
+  species collection" rule, which otherwise applies only to **landed** species.
 - No caller-supplied object is ever passed directly as a MongoDB filter or update document — every
   filter/update is built field-by-field from guarded scalars.
 - No dynamic collection selection (`CATCH_RECORD_COLLECTION` is a fixed constant) and no environment
@@ -420,8 +458,8 @@ Exactly two optional fields, each tied to an already-approved canonical concept 
 bag:
 
 - `section` — one of the Step 05 canonical nested-field names (`vessel`, `trip`, `pairFishing`, `gears`,
-  `landing`, `artifacts`) identifying _which_ section an event relates to. A label only, never the
-  section's content.
+  `speciesNotLanded`, `artifacts`) identifying _which_ section an event relates to. A label only, never
+  the section's content.
 - `submissionNumber` — a bounded positive integer (1-1000), justified by the canonical
   `numberOfSubmissions` field already on the Canonical Catch Record Object v1.
 

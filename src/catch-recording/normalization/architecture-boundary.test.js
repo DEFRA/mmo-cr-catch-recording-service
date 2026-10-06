@@ -8,7 +8,7 @@ const FRAMEWORK_NEUTRAL_FILES = [
   'sections/trip.js',
   'sections/pair-fishing.js',
   'sections/gears.js',
-  'sections/landing.js'
+  'sections/species-not-landed.js'
 ]
 
 describe('#architecture-boundary (normalization)', () => {

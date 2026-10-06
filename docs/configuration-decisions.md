@@ -192,21 +192,85 @@ code, name, areaType, parentCode?, parentName?, areaKm2?, centroid? }, geometry 
 - Historical snapshots already stored on a Catch Record are never rewritten merely because current
   reference data changed or became inactive.
 
-### Species catch-detail attributes — not Reference Data Service concepts
+### Species weight fields — not Reference Data Service concepts (superseded by the Step 27 redesign)
 
-Per `design/architecture/species-property-completion.md`, the per-species catch-detail values
-(`weightAboveMinimum`, `weightBelowMinimum`, `weightDiscarded`) are Catch Recording's own captured data,
-not Reference Data Service reference data — there is no RDS endpoint for them and none is called. The
-canonical `catchDetails[].attributeId` codes are a small fixed, locally-owned catalogue:
+Per `design/architecture/species-property-completion.md`, the per-species weight values
+(`weightAboveMinimumKg`, `weightBelowMinimumKg`, `weightLegallyDiscardedKg`) are Catch Recording's own
+captured data, not Reference Data Service reference data — there is no RDS endpoint for them and none is
+called.
 
-| `attributeId` | Meaning              | `nameSnapshot`                         | `unitSnapshot` |
-| ------------- | -------------------- | -------------------------------------- | -------------- |
-| `LSC`         | `weightAboveMinimum` | Weight Above Minimum Size Kept Onboard | `kg`           |
-| `BMS`         | `weightBelowMinimum` | Weight Below Minimum Size Kept Onboard | `kg`           |
-| `DIS`         | `weightDiscarded`    | Weight Discarded                       | `kg`           |
+> **Superseded (Step 27 redesign):** the original small, fixed `catchDetails[].attributeId` catalogue
+> (`LSC`/`BMS`/`DIS`) described here has been replaced by three fixed, optional weight fields directly on
+> each species entry — see "Step 27 redesign: canonical species/landing model" below for the approved
+> replacement shape and field names.
 
-`BMS` and `DIS` are placeholder codes approved by the service owner pending any future confirmation; `LSC`
-was already given in `canonical-catch-record-object.md`.
+### Multi-gear completeness and domain progress (Step 26) — approved decisions
+
+No approved document fully specified the exact per-gear completeness rules before this step, so the
+following were confirmed by the service owner (Clarification Resolver escalation, Phase 6):
+
+- **Required characteristics** — the Reference Data Service's gear catalogue `required` flag (and
+  `vesselLengthApplicability`) exists only transiently during the Step 23 save-time resolution and is
+  never persisted on the Catch Record. Re-fetching it during progress calculation would make completeness
+  a live-dependency, non-deterministic function of the persisted record, which this step's own
+  reliability requirements forbid ("evaluate the in-memory canonical record without unnecessary external
+  calls"; "produce deterministic output for equivalent canonical input"). **Approved decision: Step 26
+  stays a pure, synchronous, dependency-free function. "Required characteristics" completeness is
+  evaluated as "at least one characteristic is supplied" (presence), not exact required-ID matching.**
+  `vesselLengthApplicability` is not evaluated at all under this decision.
+- **Required catch details** — superseded by the Step 27 redesign (see below): completeness is now
+  evaluated against the flat weight fields directly, not a `catchDetails[]` catalogue. **Approved
+  decision (unchanged in substance): "at least one weight field present on at least one species entry for
+  the gear" is the completeness bar** — no specific weight field is individually mandatory.
+- **Empty/absent `gears` collection** — `allGearsComplete` is `false` whenever `gears` is empty or absent;
+  it is never vacuously `true` merely because there is nothing to be incomplete. The canonical hierarchy
+  requires one or more gears, so "no gears yet" is treated as incomplete.
+- **`currentIncompleteGearAssociationId`** — returned only when exactly one gear is incomplete; `null`
+  (never a guessed/priority-ordered value) when zero or more than one gear is incomplete. **Approved
+  decision (service owner):** deciding which incomplete gear to address next, when more than one is
+  incomplete, is the frontend's journey-sequencing concern, not a backend-invented priority rule — a
+  "check your answers" page at the end of the journey is responsible for full-journey completeness, while
+  the backend's role is only to confirm each individual part (each gear/section) is complete per request.
+- **`submissionEligible`** — not composed by this step. It is not yet an approved field of the Step 22
+  standard save-response contract, and prematurely claiming full submission eligibility while
+  complete-record validation (Step 32) remains unevaluated would be incorrect.
+
+### Step 27 redesign: canonical species/landing model — approved decisions
+
+Mid-way through Step 27 ("landing intention and retained-catch consistency"), the service owner confirmed
+that none of Step 27's prerequisite decisions (`landing.intention` allowed values, `retainedSpecies`
+shape, `notLandingDetails` rules) had ever been approved anywhere in the repository — they were genuinely
+undecided product questions, not an implementation gap. Rather than inventing values for an architecture
+the service owner no longer wanted, the service owner replaced the entire `landing`/`retainedSpecies`
+model with a new canonical shape (Clarification Resolver escalation, Phase 6). This fully supersedes
+Steps 23–26's original `speciesCaught[].associationId`/`catchDetails[].attributeId` shape, which has been
+reworked to match. The following were confirmed directly by the service owner:
+
+- **`landing`/`retainedSpecies`/`notLandingDetails` are eliminated entirely.** There is no landing
+  intention concept in the canonical contract. Step 27's actual remaining scope is "implement the
+  `speciesNotLanded` root section", not "landing intention and retained-catch consistency" as originally
+  titled.
+- **Flat species-weight entry shape** replaces the old `{ associationId, species: { id, ... },
+catchDetails: [{ attributeId, value, ... }] }` nesting. Both `gears[].speciesCaught[]` and the new
+  root-level `speciesNotLanded[]` use the identical shape: `{ id, faoCodeSnapshot, nameSnapshot,
+weightAboveMinimumKg?, weightBelowMinimumKg?, weightLegallyDiscardedKg?, weightPrecision? }`. A
+  species' own authoritative `id` is its natural key — there is no separate species-level
+  `associationId`, and no catch-detail attribute catalogue.
+- **Weight values are numbers, never strings** — even though an early illustrative example used string
+  values, the approved canonical type is `number | null`.
+- **`weightPrecision` has exactly two approved values: `wholeNumber` and `oneDecimalPlace`.** No other
+  value is approved, and there is no cross-validation between `weightPrecision` and the actual decimal
+  places of a supplied weight value — it is a display hint only.
+- **Species snapshot uses the approved slim convention** (`id` + `faoCodeSnapshot`/`nameSnapshot`), not
+  the full Reference Data Service response shape (name/faoCode/scientificName/commonNames/localNames/
+  isActive) shown in an early illustrative example — consistent with every other reference selection in
+  this service (gear, statistical area, ports).
+- **Root-level `speciesNotLanded` is the one approved exception to "no root-level species collection".**
+  That architecture rule was always intended to apply only to **landed** species (`gears[].speciesCaught`,
+  which must stay tied to the gear that caught it); species caught but not landed are trip-level by
+  nature (not meaningfully tied to a single gear), so a root-level, trip-level collection is the correct
+  shape for them. `speciesNotLanded` is independent of `gears` - the same species may appear in both
+  collections, and no cross-reference check is applied between them.
 
 ## Security and privacy
 

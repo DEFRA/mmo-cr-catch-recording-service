@@ -41,21 +41,30 @@ calculated by Step 08, never stored.
 
 ```text
 Catch Record
-└── gears[] (GearAssociation, one or more)
-    ├── characteristics[]
-    ├── statisticalArea (exactly one when complete)
-    └── speciesCaught[] (SpeciesAssociation)
-        └── catchDetails[]
+├── gears[] (GearAssociation, one or more)
+│   ├── characteristics[]
+│   ├── statisticalArea (exactly one when complete)
+│   └── speciesCaught[] (SpeciesWeightEntry) — landed species, per gear
+└── speciesNotLanded[] (SpeciesWeightEntry) — root-level, trip-level, not tied to any gear
 ```
 
-- `gears[].associationId` and `gears[].speciesCaught[].associationId` are **relationship identities**,
-  distinct from the authoritative reference IDs (`gear.id`, `species.id`).
-- Statistical area, species, and catch details belong to their containing gear association — there is
-  no root-level `statisticalArea` or root-level species collection.
-- The same authoritative species may appear independently under more than one gear association, each
-  with its own `associationId`.
-- `landing.retainedSpecies[]` entries reference an existing `gearAssociationId`/`speciesAssociationId`
-  pair already present under `gears` — they never create an independent species collection.
+- `gears[].associationId` is a **relationship identity**, distinct from the authoritative reference ID
+  (`gear.id`). A species entry's own `id` (the authoritative species reference ID) is its natural key —
+  there is no separate species-level `associationId`, and at most one occurrence of a given species `id`
+  may exist per gear (or, independently, per `speciesNotLanded` collection).
+- Characteristics and statistical area belong to their containing gear association — there is no
+  root-level `statisticalArea`.
+- The same authoritative species may appear independently under more than one gear association, and
+  independently again under `speciesNotLanded`.
+- `speciesNotLanded` is root-level and trip-level by design — the one approved exception to the "no
+  root-level species collection" rule, which otherwise applies only to **landed** species
+  (`gears[].speciesCaught`). It exists because species caught but not landed are not meaningfully tied
+  to the gear that caught them.
+- Both `speciesCaught` entries and `speciesNotLanded` entries share the same shape: `id`, a slim
+  `faoCodeSnapshot`/`nameSnapshot` species snapshot, and the optional weight fields
+  `weightAboveMinimumKg`, `weightBelowMinimumKg`, `weightLegallyDiscardedKg` (numbers, never strings)
+  plus an optional `weightPrecision` (`wholeNumber` | `oneDecimalPlace`). There is no `catchDetails[]`/
+  `attributeId` catalogue.
 
 ## Server-owned fields
 
@@ -87,10 +96,7 @@ The canonical object is the **current mutable operational record** only:
 
 - `pairFishing.pairVessel` / `pairFishing.pairSkipperName` populated shape when `enabled` is `true` —
   only the three field names are represented.
-- `landing.intention` allowed enum values, `retainedSpecies[].details` optional fields, and
-  `notLandingDetails` shape — Step 27. The fixtures intentionally use `intention: null` rather than
-  reproducing the canonical doc's own flagged inconsistent sample combination.
-- Exact characteristic/catch-detail `value` type and `unitSnapshot` validation — deferred; JSDoc marks
+- Exact gear-characteristic `value` type and `unitSnapshot` validation — deferred; JSDoc marks
   `value` as `number | string | boolean`.
 - Artifact metadata entry shape beyond `{ submissionNumber, type }` — Step 33.
 - Friendly-reference generation, internal ID generation, timestamp generation, actor resolution — not

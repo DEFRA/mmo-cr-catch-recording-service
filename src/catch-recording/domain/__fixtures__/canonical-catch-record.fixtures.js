@@ -18,7 +18,7 @@ function deepFreeze(value) {
 }
 
 const GEAR_ASSOCIATION_ID = 'b5ca27d2-8e5f-4920-89a5-d4756829b44e'
-const SPECIES_ASSOCIATION_ID = '0859623d-e2f8-4383-9705-bdc9760bf9a4'
+const SPECIES_ID = '60628fcb-97af-40d0-b992-099216c8fc40'
 const SHARED_USER_ID = 'e0ec9737-908e-4749-97e0-41caf19de2c2'
 const FIRST_SUBMISSION_AT = '2026-10-05T12:15:00Z'
 
@@ -50,20 +50,13 @@ function baseGear() {
     },
     speciesCaught: [
       {
-        associationId: SPECIES_ASSOCIATION_ID,
-        species: {
-          id: '60628fcb-97af-40d0-b992-099216c8fc40',
-          faoCodeSnapshot: 'COD',
-          nameSnapshot: 'Atlantic Cod'
-        },
-        catchDetails: [
-          {
-            attributeId: 'LSC',
-            nameSnapshot: 'Weight Above Minimum Size Kept Onboard',
-            value: 5,
-            unitSnapshot: 'kg'
-          }
-        ]
+        id: SPECIES_ID,
+        faoCodeSnapshot: 'COD',
+        nameSnapshot: 'Atlantic Cod',
+        weightAboveMinimumKg: 120.5,
+        weightBelowMinimumKg: 4,
+        weightLegallyDiscardedKg: null,
+        weightPrecision: 'oneDecimalPlace'
       }
     ]
   }
@@ -104,14 +97,9 @@ function baseCatchRecord(overrides) {
       pairSkipperName: null
     },
     gears: [baseGear()],
-    // `intention` is left `null`: the approved allowed values are unresolved (deferred to Step 27).
-    // This deliberately does not reproduce the canonical doc's own flagged inconsistent sample
-    // ("NOT_LANDING" with a non-empty retainedSpecies collection) as if it were valid.
-    landing: {
-      intention: null,
-      retainedSpecies: [],
-      notLandingDetails: null
-    },
+    // `speciesNotLanded` is the one approved root-level species collection (Step 27 redesign,
+    // service-owner decision): a single, trip-level list independent of any gear's `speciesCaught`.
+    speciesNotLanded: [],
     artifacts: [],
     createdAt: '2026-10-05T10:35:00Z',
     createdBy: SHARED_USER_ID,
@@ -140,29 +128,17 @@ export const submittedExample = deepFreeze(
     status: PERSISTED_STATUSES.SUBMITTED,
     numberOfSubmissions: 1,
     hasUnsubmittedChanges: false,
-    landing: {
-      intention: null,
-      retainedSpecies: [
-        {
-          gearAssociationId: GEAR_ASSOCIATION_ID,
-          speciesAssociationId: SPECIES_ASSOCIATION_ID,
-          species: {
-            id: '60628fcb-97af-40d0-b992-099216c8fc40',
-            faoCodeSnapshot: 'COD',
-            nameSnapshot: 'Atlantic Cod'
-          },
-          details: [
-            {
-              attributeId: 'LSC',
-              nameSnapshot: 'Weight Above Minimum Size Kept Onboard',
-              value: 5,
-              unitSnapshot: 'kg'
-            }
-          ]
-        }
-      ],
-      notLandingDetails: null
-    },
+    speciesNotLanded: [
+      {
+        id: 'WHG',
+        faoCodeSnapshot: 'WHG',
+        nameSnapshot: 'Whiting',
+        weightAboveMinimumKg: 6.5,
+        weightBelowMinimumKg: null,
+        weightLegallyDiscardedKg: null,
+        weightPrecision: 'oneDecimalPlace'
+      }
+    ],
     artifacts: [
       { submissionNumber: 1, type: 'JSON_SNAPSHOT' },
       { submissionNumber: 1, type: 'PDF_RECEIPT' }

@@ -325,7 +325,7 @@ describe('#catch-history-persistence (MongoDB integration)', () => {
       const input = buildInput({
         catchRecordId: 'catch-record-metadata',
         eventType: CATCH_HISTORY_EVENT_TYPES.AMENDMENT_SECTION_SAVED,
-        metadata: { section: 'landing', submissionNumber: 2 }
+        metadata: { section: 'speciesNotLanded', submissionNumber: 2 }
       })
 
       await appendCatchHistoryEvent(db, input)
@@ -337,7 +337,7 @@ describe('#catch-history-persistence (MongoDB integration)', () => {
       })
 
       expect(results[0].metadata).toEqual({
-        section: 'landing',
+        section: 'speciesNotLanded',
         submissionNumber: 2
       })
     })

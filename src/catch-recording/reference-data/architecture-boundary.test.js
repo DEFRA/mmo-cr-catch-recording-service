@@ -13,7 +13,6 @@ const FRAMEWORK_NEUTRAL_FILES = [
   'statistical-areas-client.js',
   'reference-data-client.js',
   'active-selection.js',
-  'catch-detail-attributes.js',
   'snapshot-mappers.js',
   'reference-resolvers.js',
   'vessel-resolution.js',

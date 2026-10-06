@@ -36,15 +36,15 @@ describe('#validateCatchRecord', () => {
     const result = validateCatchRecord({
       schemaVersion: 2, // structural: UNSUPPORTED_VALUE
       gears: [
-        { associationId: 'gear-1', speciesCaught: [{ associationId: 's1' }] },
-        { associationId: 'gear-1', speciesCaught: [] } // gears: DUPLICATE_RELATIONSHIP
+        {
+          associationId: 'gear-1',
+          gear: { id: 'g1' },
+          speciesCaught: [{ id: 's1' }]
+        },
+        { associationId: 'gear-1', gear: { id: 'g1' }, speciesCaught: [] } // gears: DUPLICATE_RELATIONSHIP
       ],
       pairFishing: { enabled: false, pairVessel: { id: 'abc' } }, // pair-fishing: CONDITIONAL_FIELD_INCONSISTENT
-      landing: {
-        retainedSpecies: [
-          { gearAssociationId: 'missing-gear', speciesAssociationId: 's1' }
-        ] // landing: INVALID_REFERENCE
-      }
+      speciesNotLanded: [{}] // species-not-landed: REQUIRED
     })
 
     expect(result.valid).toBe(false)
@@ -52,22 +52,18 @@ describe('#validateCatchRecord', () => {
     expect(codes).toContain('UNSUPPORTED_VALUE')
     expect(codes).toContain('DUPLICATE_RELATIONSHIP')
     expect(codes).toContain('CONDITIONAL_FIELD_INCONSISTENT')
-    expect(codes).toContain('INVALID_REFERENCE')
+    expect(codes).toContain('REQUIRED')
     expect(
       new Set(result.issues.map((issue) => `${issue.code}|${issue.path}`)).size
     ).toBe(result.issues.length)
   })
 
-  test('Should produce deterministic issue ordering (structure, gears, pair-fishing, landing)', () => {
+  test('Should produce deterministic issue ordering (structure, gears, pair-fishing, species-not-landed)', () => {
     const payload = {
       schemaVersion: 2,
       gears: [{ associationId: 'gear-1' }, { associationId: 'gear-1' }],
       pairFishing: { enabled: false, pairSkipperName: 'Jane' },
-      landing: {
-        retainedSpecies: [
-          { gearAssociationId: 'missing', speciesAssociationId: 'missing' }
-        ]
-      }
+      speciesNotLanded: [{ id: 'missing' }, { id: 'missing' }]
     }
 
     const first = validateCatchRecord(payload)

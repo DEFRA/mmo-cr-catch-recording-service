@@ -17,8 +17,14 @@ describe('#buildStandardSaveResponse', () => {
       displayStatus: 'Draft',
       version: newDraftExample.version,
       savedSection: null,
-      sectionCompletion: { trip: true, pairFishing: true },
-      progress: { hasUnsubmittedChanges: false, numberOfSubmissions: 0 }
+      sectionCompletion: { trip: true, pairFishing: true, gears: true },
+      progress: {
+        hasUnsubmittedChanges: false,
+        numberOfSubmissions: 0,
+        incompleteGearAssociationIds: [],
+        currentIncompleteGearAssociationId: null,
+        allGearsComplete: true
+      }
     })
   })
 
@@ -29,7 +35,10 @@ describe('#buildStandardSaveResponse', () => {
     expect(response.displayStatus).toBe('Amended')
     expect(response.progress).toEqual({
       hasUnsubmittedChanges: true,
-      numberOfSubmissions: 1
+      numberOfSubmissions: 1,
+      incompleteGearAssociationIds: [],
+      currentIncompleteGearAssociationId: null,
+      allGearsComplete: true
     })
   })
 
@@ -82,6 +91,35 @@ describe('#buildStandardSaveResponse', () => {
     expect(
       buildStandardSaveResponse(complete).sectionCompletion.pairFishing
     ).toBe(true)
+  })
+
+  test('Step 26: reports sectionCompletion.gears and progress facts false when a gear is incomplete', () => {
+    const incomplete = {
+      ...newDraftExample,
+      gears: [{ ...newDraftExample.gears[0], statisticalArea: null }]
+    }
+
+    const response = buildStandardSaveResponse(incomplete)
+
+    expect(response.sectionCompletion.gears).toBe(false)
+    expect(response.progress.allGearsComplete).toBe(false)
+    expect(response.progress.incompleteGearAssociationIds).toEqual([
+      newDraftExample.gears[0].associationId
+    ])
+    expect(response.progress.currentIncompleteGearAssociationId).toBe(
+      newDraftExample.gears[0].associationId
+    )
+  })
+
+  test('Step 26: reports incomplete when the gears collection is empty', () => {
+    const noGears = { ...newDraftExample, gears: [] }
+
+    const response = buildStandardSaveResponse(noGears)
+
+    expect(response.sectionCompletion.gears).toBe(false)
+    expect(response.progress.allGearsComplete).toBe(false)
+    expect(response.progress.incompleteGearAssociationIds).toEqual([])
+    expect(response.progress.currentIncompleteGearAssociationId).toBeNull()
   })
 
   test('never exposes internal persistence or history metadata', () => {

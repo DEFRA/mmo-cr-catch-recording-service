@@ -29,7 +29,7 @@ describe('#server-owned-fields', () => {
     expect(SERVER_OWNED_FIELDS).toContain(field)
   })
 
-  test.each(['vessel', 'trip', 'pairFishing', 'gears', 'landing'])(
+  test.each(['vessel', 'trip', 'pairFishing', 'gears', 'speciesNotLanded'])(
     'Should not classify %s as server-owned',
     (field) => {
       expect(isServerOwnedField(field)).toBe(false)
