@@ -9,64 +9,72 @@ import {
   isNullableString,
   isNullableFiniteNumber,
   isStringArray,
-  isPlainObject
+  isPlainObject,
+  isOptionalField
 } from './response-validators.js'
+import { isSuccessStatus } from './http-status.js'
 
 const BASE_PATH = '/api/v1/reference-data/gears'
 
+// Declarative field validators: reduces both the single-expression conditional-operator count and each
+// function's cyclomatic complexity compared with one large `&&` chain, without changing behaviour.
+const APPLICABLE_CHARACTERISTIC_VALIDATORS = Object.freeze([
+  ['id', isNonEmptyString],
+  ['characteristicId', isNonEmptyString],
+  ['fixed', (value) => typeof value === 'boolean'],
+  ['required', (value) => typeof value === 'boolean'],
+  [
+    'vesselLengthApplicability',
+    (value) => isOptionalField(value, isStringArray)
+  ]
+])
+
+const GEAR_ITEM_VALIDATORS = Object.freeze([
+  ['id', isNonEmptyString],
+  ['code', isNonEmptyString],
+  ['name', isNonEmptyString],
+  ['type', isNonEmptyString],
+  ['categoryId', isNonEmptyString],
+  ['pairFishing', (value) => typeof value === 'boolean'],
+  ['active', (value) => typeof value === 'boolean']
+])
+
+const CHARACTERISTIC_CATALOG_VALIDATORS = Object.freeze([
+  ['id', isNonEmptyString],
+  ['code', isNonEmptyString],
+  ['name', isNonEmptyString],
+  ['dataType', isNonEmptyString],
+  ['unit', (value) => isOptionalField(value, isNullableString)],
+  ['minValue', (value) => isOptionalField(value, isNullableFiniteNumber)],
+  ['maxValue', (value) => isOptionalField(value, isNullableFiniteNumber)]
+])
+
+function matchesAllFields(entry, validators) {
+  return validators.every(([field, validator]) => validator(entry[field]))
+}
+
 function isValidApplicableCharacteristic(entry) {
-  if (!isPlainObject(entry)) {
-    return false
-  }
-
-  const { id, characteristicId, fixed, required, vesselLengthApplicability } =
-    entry
-
   return (
-    isNonEmptyString(id) &&
-    isNonEmptyString(characteristicId) &&
-    typeof fixed === 'boolean' &&
-    typeof required === 'boolean' &&
-    (vesselLengthApplicability === undefined ||
-      isStringArray(vesselLengthApplicability))
+    isPlainObject(entry) &&
+    matchesAllFields(entry, APPLICABLE_CHARACTERISTIC_VALIDATORS)
   )
 }
 
 function isValidGearItem(entry) {
-  if (!isPlainObject(entry)) {
+  if (!isPlainObject(entry) || !matchesAllFields(entry, GEAR_ITEM_VALIDATORS)) {
     return false
   }
 
-  const { id, code, name, type, categoryId, pairFishing, active } = entry
-
   return (
-    isNonEmptyString(id) &&
-    isNonEmptyString(code) &&
-    isNonEmptyString(name) &&
-    isNonEmptyString(type) &&
-    isNonEmptyString(categoryId) &&
-    typeof pairFishing === 'boolean' &&
-    typeof active === 'boolean' &&
     Array.isArray(entry.applicableCharacteristics) &&
     entry.applicableCharacteristics.every(isValidApplicableCharacteristic)
   )
 }
 
 function isValidCharacteristicCatalogEntry(entry) {
-  if (!isPlainObject(entry)) {
-    return false
-  }
-
-  const { id, code, name, dataType, unit, minValue, maxValue } = entry
-
   return (
-    isNonEmptyString(id) &&
-    isNonEmptyString(code) &&
-    isNonEmptyString(name) &&
-    isNonEmptyString(dataType) &&
-    (unit === undefined || isNullableString(unit)) &&
-    (minValue === undefined || isNullableFiniteNumber(minValue)) &&
-    (maxValue === undefined || isNullableFiniteNumber(maxValue))
+    isPlainObject(entry) &&
+    matchesAllFields(entry, CHARACTERISTIC_CATALOG_VALIDATORS)
   )
 }
 
@@ -175,7 +183,7 @@ export function createGetGearById({ httpClient }) {
       correlationId
     })
 
-    if (status < 200 || status >= 300) {
+    if (!isSuccessStatus(status)) {
       throw upstreamInvalidResponseError(
         new Error(`Unexpected gear response status ${status}`)
       )

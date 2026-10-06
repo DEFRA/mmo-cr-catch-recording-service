@@ -5,6 +5,7 @@ import {
   upstreamInvalidResponseError
 } from './reference-data-errors.js'
 import { isNonEmptyString, isPlainObject } from './response-validators.js'
+import { HTTP_STATUS_NOT_FOUND, isSuccessStatus } from './http-status.js'
 
 const BASE_PATH = '/api/v1/reference-data/species'
 
@@ -27,6 +28,19 @@ function isValidLocalName(entry) {
   )
 }
 
+function isValidNameArray(value, isValidEntry) {
+  return Array.isArray(value) && value.every(isValidEntry)
+}
+
+function hasValidSpeciesScalarFields(body) {
+  return (
+    isNonEmptyString(body.id) &&
+    isNonEmptyString(body.faoCode) &&
+    isNonEmptyString(body.scientificName) &&
+    typeof body.active === 'boolean'
+  )
+}
+
 /**
  * @param {unknown} body
  * @returns {{ id: string, faoCode: string, scientificName: string, commonNames: object[], localNames:
@@ -37,20 +51,19 @@ function validateSpeciesResponse(body) {
     return null
   }
 
-  const { id, faoCode, scientificName, commonNames, localNames, active } = body
-
-  if (
-    !isNonEmptyString(id) ||
-    !isNonEmptyString(faoCode) ||
-    !isNonEmptyString(scientificName) ||
-    !Array.isArray(commonNames) ||
-    !commonNames.every(isValidCommonName) ||
-    !Array.isArray(localNames) ||
-    !localNames.every(isValidLocalName) ||
-    typeof active !== 'boolean'
-  ) {
+  if (!hasValidSpeciesScalarFields(body)) {
     return null
   }
+
+  if (!isValidNameArray(body.commonNames, isValidCommonName)) {
+    return null
+  }
+
+  if (!isValidNameArray(body.localNames, isValidLocalName)) {
+    return null
+  }
+
+  const { id, faoCode, scientificName, commonNames, localNames, active } = body
 
   return Object.freeze({
     id,
@@ -94,11 +107,11 @@ export function createGetSpeciesById({ httpClient }) {
       correlationId
     })
 
-    if (status === 404) {
+    if (status === HTTP_STATUS_NOT_FOUND) {
       throw referenceItemNotFoundError('species')
     }
 
-    if (status < 200 || status >= 300) {
+    if (!isSuccessStatus(status)) {
       throw upstreamInvalidResponseError(
         new Error(`Unexpected species response status ${status}`)
       )

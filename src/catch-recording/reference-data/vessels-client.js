@@ -10,25 +10,44 @@ import {
   isFiniteNumber,
   isPlainObject
 } from './response-validators.js'
+import { HTTP_STATUS_NOT_FOUND, isSuccessStatus } from './http-status.js'
 
 const BASE_PATH = '/api/v1/reference-data/vessels'
+const IDENTIFIER_FIELDS = Object.freeze([
+  'cfr',
+  'uvi',
+  'mmsi',
+  'ircs',
+  'externalMark',
+  'registrationNumber'
+])
+// Declarative field validators: reduces both the single-expression conditional-operator count and the
+// function's cyclomatic complexity compared with one large `||` chain, without changing behaviour.
+const VESSEL_FIELD_VALIDATORS = Object.freeze([
+  ['id', isNonEmptyString],
+  ['name', isNonEmptyString],
+  ['namePln', isNullableString],
+  ['lengthOverallMetres', isFiniteNumber],
+  ['status', isNonEmptyString],
+  ['activeFrom', isNonEmptyString],
+  ['activeTo', isNullableString]
+])
 
 function isValidIdentifiers(identifiers) {
   if (!isPlainObject(identifiers)) {
     return false
   }
 
-  return [
-    'cfr',
-    'uvi',
-    'mmsi',
-    'ircs',
-    'externalMark',
-    'registrationNumber'
-  ].every((field) => {
+  return IDENTIFIER_FIELDS.every((field) => {
     const value = identifiers[field]
     return value === undefined || isNullableString(value)
   })
+}
+
+function hasValidVesselFields(body) {
+  return VESSEL_FIELD_VALIDATORS.every(([field, validator]) =>
+    validator(body[field])
+  )
 }
 
 /**
@@ -44,29 +63,25 @@ function validateVesselResponse(body) {
     return null
   }
 
+  const normalised = { namePln: null, activeTo: null, ...body }
+
+  if (
+    !hasValidVesselFields(normalised) ||
+    !isValidIdentifiers(normalised.identifiers)
+  ) {
+    return null
+  }
+
   const {
     id,
     name,
-    namePln = null,
+    namePln,
     identifiers,
     lengthOverallMetres,
     status,
     activeFrom,
-    activeTo = null
-  } = body
-
-  if (
-    !isNonEmptyString(id) ||
-    !isNonEmptyString(name) ||
-    !isNullableString(namePln) ||
-    !isValidIdentifiers(identifiers) ||
-    !isFiniteNumber(lengthOverallMetres) ||
-    !isNonEmptyString(status) ||
-    !isNonEmptyString(activeFrom) ||
-    !isNullableString(activeTo)
-  ) {
-    return null
-  }
+    activeTo
+  } = normalised
 
   return Object.freeze({
     id,
@@ -102,11 +117,11 @@ export function createGetVesselById({ httpClient }) {
       correlationId
     })
 
-    if (status === 404) {
+    if (status === HTTP_STATUS_NOT_FOUND) {
       throw referenceItemNotFoundError('vessel')
     }
 
-    if (status < 200 || status >= 300) {
+    if (!isSuccessStatus(status)) {
       throw upstreamInvalidResponseError(
         new Error(`Unexpected vessel response status ${status}`)
       )

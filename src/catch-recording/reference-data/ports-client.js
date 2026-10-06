@@ -9,6 +9,7 @@ import {
   isFiniteNumber,
   isPlainObject
 } from './response-validators.js'
+import { HTTP_STATUS_NOT_FOUND, isSuccessStatus } from './http-status.js'
 
 const BASE_PATH = '/api/v1/reference-data/ports'
 
@@ -76,11 +77,11 @@ export function createGetPortById({ httpClient }) {
       correlationId
     })
 
-    if (status === 404) {
+    if (status === HTTP_STATUS_NOT_FOUND) {
       throw referenceItemNotFoundError('port')
     }
 
-    if (status < 200 || status >= 300) {
+    if (!isSuccessStatus(status)) {
       throw upstreamInvalidResponseError(
         new Error(`Unexpected port response status ${status}`)
       )

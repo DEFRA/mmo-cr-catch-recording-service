@@ -3,7 +3,14 @@ import {
   upstreamTimeoutError
 } from './reference-data-errors.js'
 
-const RETRYABLE_STATUSES = new Set([502, 503, 504])
+const HTTP_STATUS_BAD_GATEWAY = 502
+const HTTP_STATUS_SERVICE_UNAVAILABLE = 503
+const HTTP_STATUS_GATEWAY_TIMEOUT = 504
+const RETRYABLE_STATUSES = new Set([
+  HTTP_STATUS_BAD_GATEWAY,
+  HTTP_STATUS_SERVICE_UNAVAILABLE,
+  HTTP_STATUS_GATEWAY_TIMEOUT
+])
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -54,8 +61,11 @@ async function attemptGet(options, { path, correlationId }) {
 
 async function getWithRetry(options, { path, correlationId }) {
   const { retryCount, retryDelayMs } = options
+  let attempt = 0
 
-  for (let attempt = 0; attempt <= retryCount; attempt += 1) {
+  // An infinite loop with no `break`: every exit is an explicit `return` or `throw` below, so there is
+  // no implicit fall-through path returning `undefined`.
+  while (true) {
     try {
       return await attemptGet(options, { path, correlationId })
     } catch (cause) {
@@ -75,6 +85,7 @@ async function getWithRetry(options, { path, correlationId }) {
         throw dependencyUnavailableError(cause)
       }
       await sleep(retryDelayMs)
+      attempt += 1
     }
   }
 }

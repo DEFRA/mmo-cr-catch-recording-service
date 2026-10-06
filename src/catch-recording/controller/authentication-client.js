@@ -3,7 +3,14 @@ import { authenticationRequiredError } from './authentication-errors.js'
 
 const DEFAULT_PATH = '/validate'
 const BEARER_PREFIX = 'Bearer '
-const RETRYABLE_STATUSES = new Set([502, 503, 504])
+const HTTP_STATUS_BAD_GATEWAY = 502
+const HTTP_STATUS_SERVICE_UNAVAILABLE = 503
+const HTTP_STATUS_GATEWAY_TIMEOUT = 504
+const RETRYABLE_STATUSES = new Set([
+  HTTP_STATUS_BAD_GATEWAY,
+  HTTP_STATUS_SERVICE_UNAVAILABLE,
+  HTTP_STATUS_GATEWAY_TIMEOUT
+])
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -71,8 +78,12 @@ async function attemptValidate(options, { token, correlationId }) {
 
 async function validateWithRetry(options, { token, correlationId }) {
   const { retryCount, retryDelayMs } = options
+  let attempt = 0
 
-  for (let attempt = 0; attempt <= retryCount; attempt += 1) {
+  // An infinite loop with no `break`: every exit is an explicit `return` or `throw` below, so there is
+  // no implicit fall-through path returning `undefined` (avoids an inconsistent-return finding while
+  // still bounding actual attempts to `retryCount + 1` via the `isLastAttempt` check).
+  while (true) {
     try {
       return await attemptValidate(options, { token, correlationId })
     } catch (cause) {
@@ -88,6 +99,7 @@ async function validateWithRetry(options, { token, correlationId }) {
       }
 
       await sleep(retryDelayMs)
+      attempt += 1
     }
   }
 }

@@ -4,6 +4,7 @@ const FRAMEWORK_NEUTRAL_FILES = [
   'reference-data-errors.js',
   'stable-id.js',
   'response-validators.js',
+  'http-status.js',
   'reference-data-http-client.js',
   'vessels-client.js',
   'gears-client.js',

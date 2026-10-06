@@ -31,3 +31,16 @@ export function isStringArray(value) {
 export function isPlainObject(value) {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
+
+/**
+ * An optional field is either genuinely absent (`undefined`) or must satisfy `validator` - used to keep
+ * each resource validator's field checks as small, separately-reasoned predicates rather than one large
+ * conditional expression.
+ *
+ * @param {unknown} value
+ * @param {(value: unknown) => boolean} validator
+ * @returns {boolean}
+ */
+export function isOptionalField(value, validator) {
+  return value === undefined || validator(value)
+}

@@ -10,8 +10,26 @@ import {
   isNullableFiniteNumber,
   isPlainObject
 } from './response-validators.js'
+import { HTTP_STATUS_NOT_FOUND, isSuccessStatus } from './http-status.js'
 
 const BASE_PATH = '/api/v1/reference-data/map/statistical-areas'
+// Declarative field validators: reduces both the single-expression conditional-operator count and the
+// function's cyclomatic complexity compared with one large `||` chain, without changing behaviour.
+const AREA_PROPERTY_VALIDATORS = Object.freeze([
+  ['id', isNonEmptyString],
+  ['code', isNonEmptyString],
+  ['name', isNonEmptyString],
+  ['areaType', isNonEmptyString],
+  ['parentCode', isNullableString],
+  ['parentName', isNullableString],
+  ['areaKm2', isNullableFiniteNumber]
+])
+
+function hasValidAreaProperties(properties) {
+  return AREA_PROPERTY_VALIDATORS.every(([field, validator]) =>
+    validator(properties[field])
+  )
+}
 
 /**
  * Statistical areas have no active/inactive field in the confirmed Reference Data Service schema -
@@ -32,27 +50,19 @@ function validateStatisticalAreaResponse(body) {
     return null
   }
 
-  const {
-    id,
-    code,
-    name,
-    areaType,
-    parentCode = null,
-    parentName = null,
-    areaKm2 = null
-  } = properties
+  const normalisedProperties = {
+    parentCode: null,
+    parentName: null,
+    areaKm2: null,
+    ...properties
+  }
 
-  if (
-    !isNonEmptyString(id) ||
-    !isNonEmptyString(code) ||
-    !isNonEmptyString(name) ||
-    !isNonEmptyString(areaType) ||
-    !isNullableString(parentCode) ||
-    !isNullableString(parentName) ||
-    !isNullableFiniteNumber(areaKm2)
-  ) {
+  if (!hasValidAreaProperties(normalisedProperties)) {
     return null
   }
+
+  const { id, code, name, areaType, parentCode, parentName, areaKm2 } =
+    normalisedProperties
 
   return Object.freeze({
     id,
@@ -84,11 +94,11 @@ export function createGetStatisticalAreaById({ httpClient }) {
       correlationId
     })
 
-    if (status === 404) {
+    if (status === HTTP_STATUS_NOT_FOUND) {
       throw referenceItemNotFoundError('statistical area')
     }
 
-    if (status < 200 || status >= 300) {
+    if (!isSuccessStatus(status)) {
       throw upstreamInvalidResponseError(
         new Error(`Unexpected statistical area response status ${status}`)
       )

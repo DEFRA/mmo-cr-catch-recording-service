@@ -5,7 +5,8 @@ import {
   isNullableFiniteNumber,
   isBoolean,
   isStringArray,
-  isPlainObject
+  isPlainObject,
+  isOptionalField
 } from './response-validators.js'
 
 describe('#response-validators', () => {
@@ -48,6 +49,13 @@ describe('#response-validators', () => {
     expect(isStringArray(['a', ''])).toBe(false)
     expect(isStringArray('a')).toBe(false)
     expect(isStringArray([1])).toBe(false)
+  })
+
+  test('isOptionalField', () => {
+    expect(isOptionalField(undefined, isNonEmptyString)).toBe(true)
+    expect(isOptionalField('x', isNonEmptyString)).toBe(true)
+    expect(isOptionalField('', isNonEmptyString)).toBe(false)
+    expect(isOptionalField(null, isNonEmptyString)).toBe(false)
   })
 
   test('isPlainObject', () => {
