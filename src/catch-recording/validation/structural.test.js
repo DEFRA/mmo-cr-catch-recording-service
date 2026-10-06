@@ -68,7 +68,7 @@ describe('#validateStructure', () => {
     })
   })
 
-  test.each(['vessel', 'trip', 'pairFishing', 'landing'])(
+  test.each(['vessel', 'trip', 'pairFishing'])(
     'Should reject a malformed (non-object) %s',
     (field) => {
       const result = validateStructure({ [field]: 'not-an-object' })
@@ -82,13 +82,30 @@ describe('#validateStructure', () => {
     }
   )
 
-  test.each(['vessel', 'trip', 'pairFishing', 'landing'])(
+  test.each(['vessel', 'trip', 'pairFishing'])(
     'Should accept an absent or null %s',
     (field) => {
       expect(validateStructure({ [field]: undefined }).valid).toBe(true)
       expect(validateStructure({ [field]: null }).valid).toBe(true)
     }
   )
+
+  test('Should reject a malformed (non-array) speciesNotLanded', () => {
+    const result = validateStructure({ speciesNotLanded: 'not-an-array' })
+
+    expect(result.valid).toBe(false)
+    expect(result.issues).toContainEqual({
+      code: 'INVALID_STRUCTURE',
+      path: 'speciesNotLanded',
+      message: 'Invalid structure'
+    })
+  })
+
+  test('Should accept an absent, null, or empty speciesNotLanded', () => {
+    expect(validateStructure({ speciesNotLanded: undefined }).valid).toBe(true)
+    expect(validateStructure({ speciesNotLanded: null }).valid).toBe(true)
+    expect(validateStructure({ speciesNotLanded: [] }).valid).toBe(true)
+  })
 
   test('Should reject a root-level statisticalArea field', () => {
     const result = validateStructure({ statisticalArea: { id: 'area-1' } })
@@ -110,7 +127,7 @@ describe('#validateStructure', () => {
       code: 'INVALID_STRUCTURE',
       path: 'speciesCaught',
       message:
-        'Species must belong to a gear association, not the Catch Record root'
+        'Landed species must belong to a gear association, not the Catch Record root'
     })
   })
 
@@ -155,7 +172,7 @@ describe('#validateStructure', () => {
     })
   })
 
-  test('Should reject a malformed (non-object) species-association entry without crashing', () => {
+  test('Should reject a malformed (non-object) species entry without crashing', () => {
     const result = validateStructure({
       gears: [
         { associationId: 'gear-1', speciesCaught: ['not-an-object', null] }
@@ -197,25 +214,20 @@ describe('#validateStructure', () => {
     })
   })
 
-  test('Should require a stable associationId on every gear-to-species relationship', () => {
+  test("Should not require a species entry's own id at the structural layer (section-validator concern)", () => {
     const result = validateStructure({
       gears: [
         {
           associationId: 'gear-1',
-          speciesCaught: [{ species: { id: 'species-1' } }]
+          speciesCaught: [{ weightAboveMinimumKg: 5 }]
         }
       ]
     })
 
-    expect(result.valid).toBe(false)
-    expect(result.issues).toContainEqual({
-      code: 'REQUIRED',
-      path: 'gears.0.speciesCaught.0.associationId',
-      message: 'Required'
-    })
+    expect(result.valid).toBe(true)
   })
 
-  test('Should validate characteristics, statistical area, and catch details nested under their gear', () => {
+  test('Should validate characteristics, statistical area, and species weight fields nested under their gear', () => {
     const result = validateStructure({
       gears: [
         {
@@ -224,8 +236,8 @@ describe('#validateStructure', () => {
           statisticalArea: 'not-an-object',
           speciesCaught: [
             {
-              associationId: 'species-1',
-              catchDetails: ['not-an-object']
+              id: 'species-1',
+              weightAboveMinimumKg: 'not-a-number'
             }
           ]
         }
@@ -244,8 +256,21 @@ describe('#validateStructure', () => {
     })
     expect(result.issues).toContainEqual({
       code: 'INVALID_STRUCTURE',
-      path: 'gears.0.speciesCaught.0.catchDetails.0',
+      path: 'gears.0.speciesCaught.0.weightAboveMinimumKg',
       message: 'Invalid structure'
+    })
+  })
+
+  test('Should reject an unsupported weightPrecision nested under speciesNotLanded', () => {
+    const result = validateStructure({
+      speciesNotLanded: [{ id: 'WHG', weightPrecision: 'bogus' }]
+    })
+
+    expect(result.valid).toBe(false)
+    expect(result.issues).toContainEqual({
+      code: 'UNSUPPORTED_VALUE',
+      path: 'speciesNotLanded.0.weightPrecision',
+      message: 'Unsupported weight precision'
     })
   })
 

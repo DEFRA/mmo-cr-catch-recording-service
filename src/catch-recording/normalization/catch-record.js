@@ -3,12 +3,12 @@ import { normaliseVesselSelection } from './sections/vessel.js'
 import { normaliseTrip } from './sections/trip.js'
 import { normalisePairFishing } from './sections/pair-fishing.js'
 import { normaliseGears } from './sections/gears.js'
-import { normaliseLanding } from './sections/landing.js'
+import { normaliseSpeciesNotLanded } from './sections/species-not-landed.js'
 
 /**
  * Normalises a complete client-owned Catch Record payload by composing the approved section
  * normalisers. The output contains only the approved client-owned sections (`vessel`, `trip`,
- * `pairFishing`, `gears`, `landing`) — no server-owned root field (`schemaVersion`, `id`,
+ * `pairFishing`, `gears`, `speciesNotLanded`) — no server-owned root field (`schemaVersion`, `id`,
  * `catchRecordReference`, `ownerUserId`, `status`, `version`, `numberOfSubmissions`,
  * `hasUnsubmittedChanges`, `artifacts`, or any audit/submission/completion timestamp or actor) is ever
  * read from `input`, so none can reach output regardless of what a caller supplies. A section that is
@@ -31,6 +31,6 @@ export function normaliseCatchRecord(input) {
   copyField(output, input, 'trip', normaliseTrip)
   copyField(output, input, 'pairFishing', normalisePairFishing)
   copyField(output, input, 'gears', normaliseGears)
-  copyField(output, input, 'landing', normaliseLanding)
+  copyField(output, input, 'speciesNotLanded', normaliseSpeciesNotLanded)
   return output
 }

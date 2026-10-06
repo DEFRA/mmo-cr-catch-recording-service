@@ -193,7 +193,7 @@ describe('#catch-history-event', () => {
       'trip',
       'pairFishing',
       'gears',
-      'landing',
+      'speciesNotLanded',
       'artifacts'
     ])('Should accept the approved section name %s', (section) => {
       expect(assertSafeHistoryMetadata({ section })).toEqual({ section })

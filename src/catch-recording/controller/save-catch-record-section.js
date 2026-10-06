@@ -1,15 +1,27 @@
+import { randomUUID } from 'node:crypto'
+
 import { ApplicationError } from '#/common/helpers/errors/application-error.js'
 import { normaliseTrip } from '#/catch-recording/normalization/sections/trip.js'
 import { normalisePairFishing } from '#/catch-recording/normalization/sections/pair-fishing.js'
+import { normaliseGears } from '#/catch-recording/normalization/sections/gears.js'
+import { normaliseSpeciesNotLanded } from '#/catch-recording/normalization/sections/species-not-landed.js'
 import { validateTrip } from '#/catch-recording/validation/sections/trip.js'
 import { validatePairFishing } from '#/catch-recording/validation/sections/pair-fishing.js'
+import { validateGears } from '#/catch-recording/validation/sections/gears.js'
+import { validateSpeciesNotLanded } from '#/catch-recording/validation/sections/species-not-landed.js'
 import { resolvePort } from '#/catch-recording/reference-data/reference-resolvers.js'
 import { getTrustedBusinessDate } from '#/catch-recording/domain/business-date.js'
-import { applySectionUpdate } from '#/catch-recording/persistence/catch-persistence.js'
+import {
+  applySectionUpdate,
+  findCatchRecordByIdForOwner
+} from '#/catch-recording/persistence/catch-persistence.js'
 import {
   appendCatchHistoryEvent,
   CATCH_HISTORY_EVENT_TYPES
 } from '#/catch-recording/persistence/catch-history-persistence.js'
+import { resolveGearsSection } from './gears/resolve-gears-section.js'
+import { reconcileGears } from './gears/reconcile-gears.js'
+import { resolveSpeciesNotLandedSection } from './resolve-species-not-landed.js'
 import { buildStandardSaveResponse } from './standard-save-response.js'
 
 /**
@@ -21,16 +33,25 @@ import { buildStandardSaveResponse } from './standard-save-response.js'
  * normaliser/validator dispatched for it is resolved from an explicit lookup table, never a computed
  * property path built from client input.
  */
-export const SECTION_ALLOW_LIST = Object.freeze(['trip', 'pairFishing'])
+export const SECTION_ALLOW_LIST = Object.freeze([
+  'trip',
+  'pairFishing',
+  'gears',
+  'speciesNotLanded'
+])
 
 const SECTION_NORMALISERS = Object.freeze({
   trip: normaliseTrip,
-  pairFishing: normalisePairFishing
+  pairFishing: normalisePairFishing,
+  gears: normaliseGears,
+  speciesNotLanded: normaliseSpeciesNotLanded
 })
 
 const SECTION_VALIDATORS = Object.freeze({
   trip: validateTrip,
-  pairFishing: validatePairFishing
+  pairFishing: validatePairFishing,
+  gears: validateGears,
+  speciesNotLanded: validateSpeciesNotLanded
 })
 
 function trustedNowIso() {
@@ -119,6 +140,107 @@ async function resolveTripPorts(trip, referenceDataClient, correlationId) {
 }
 
 /**
+ * Step 23's `gears` orchestration, extended by Step 24 to resolve each gear's optional per-gear
+ * `statisticalArea` (set/clear/leave-unchanged - see `resolve-gears-section.js`/`reconcile-gears.js`):
+ * reads the currently persisted record (to source existing gear identities and nested dependent data for
+ * reconciliation only - the atomic `{_id, ownerUserId, version}` predicate on the write below remains the
+ * sole concurrency control, so a concurrent change never commits a stale merge; it fails the predicate
+ * and yields `VERSION_CONFLICT` instead), resolves every incoming gear/characteristic/statistical-area
+ * selection fresh from the Reference Data Service, then reconciles the result against the persisted
+ * collection (retain/new/removed, stable server-generated identities, deterministic ordering, never
+ * trusting a client snapshot).
+ *
+ * @param {object} input
+ * @param {import('mongodb').Db} input.db
+ * @param {unknown} input.normalisedSection the already-normalised, already-validated `gears` collection
+ * @param {object} input.referenceDataClient
+ * @param {string} input.catchRecordId
+ * @param {string} input.ownerUserId
+ * @param {string} [input.correlationId]
+ * @returns {Promise<Array<object>>} the reconciled `gears` collection to persist
+ * @throws {ApplicationError} `RESOURCE_NOT_FOUND` when the record does not exist for this owner;
+ *   `BUSINESS_VALIDATION_FAILURE` when a gear/characteristic cannot be resolved or an incoming
+ *   `associationId` is unknown; any Reference Data Service dependency failure is rethrown unchanged.
+ */
+async function resolveGearsSectionValue({
+  db,
+  normalisedSection,
+  referenceDataClient,
+  catchRecordId,
+  ownerUserId,
+  correlationId
+}) {
+  const existing = await findCatchRecordByIdForOwner(db, {
+    id: catchRecordId,
+    ownerUserId
+  })
+
+  if (!existing) {
+    throw catchRecordNotFoundError()
+  }
+
+  const resolvedIncomingGears = await resolveGearsSection(
+    normalisedSection,
+    referenceDataClient,
+    correlationId
+  )
+
+  const { gears } = reconcileGears({
+    resolvedIncomingGears,
+    existingGears: existing.gears,
+    generateAssociationId: randomUUID
+  })
+
+  return gears
+}
+
+/**
+ * Dispatches to each section's save-time snapshot-resolution/reconciliation behaviour. `trip`, `gears`,
+ * and `speciesNotLanded` all resolve authoritative snapshots fresh from the Reference Data Service at
+ * save time, never trusting a client-supplied snapshot; `gears` additionally reconciles against the
+ * persisted collection (Step 23). Every other section's already-normalised/validated value is used
+ * as-is.
+ */
+async function resolveSectionValue({
+  db,
+  section,
+  normalisedSection,
+  referenceDataClient,
+  catchRecordId,
+  ownerUserId,
+  correlationId
+}) {
+  if (section === 'trip') {
+    return resolveTripPorts(
+      normalisedSection,
+      referenceDataClient,
+      correlationId
+    )
+  }
+
+  if (section === 'gears') {
+    return resolveGearsSectionValue({
+      db,
+      normalisedSection,
+      referenceDataClient,
+      catchRecordId,
+      ownerUserId,
+      correlationId
+    })
+  }
+
+  if (section === 'speciesNotLanded') {
+    return resolveSpeciesNotLandedSection(
+      normalisedSection,
+      referenceDataClient,
+      correlationId
+    )
+  }
+
+  return normalisedSection
+}
+
+/**
  * @param {Object} input
  * @param {import('mongodb').Db} input.db
  * @param {object} input.referenceDataClient Step 15 Reference Data Service client
@@ -164,14 +286,15 @@ export async function saveCatchRecordSection({
     throw sectionValidationError(validationResult.issues)
   }
 
-  const sectionValue =
-    section === 'trip'
-      ? await resolveTripPorts(
-          normalisedSection,
-          referenceDataClient,
-          correlationId
-        )
-      : normalisedSection
+  const sectionValue = await resolveSectionValue({
+    db,
+    section,
+    normalisedSection,
+    referenceDataClient,
+    catchRecordId,
+    ownerUserId,
+    correlationId
+  })
 
   const now = trustedNowIso()
 

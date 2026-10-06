@@ -50,31 +50,27 @@
  */
 
 /**
- * @typedef {object} CatchDetail
- * @property {string} attributeId - Stable attribute ID (exact required attributes deferred, Step 25).
- * @property {string} nameSnapshot - Approved display-name snapshot.
- * @property {number|string|boolean} value - Exact value type deferred.
- * @property {string} [unitSnapshot] - Approved unit snapshot, when applicable.
- */
-
-/**
- * A gear-to-species relationship. Belongs to exactly one {@link GearAssociation}. The same
- * authoritative species may appear independently under a different gear association.
+ * A species weight entry (Step 27 redesign, service-owner decision). Identified purely by the species'
+ * own authoritative `id` — there is no synthetic relationship `associationId` any more, since a species
+ * can only appear once per gear's `speciesCaught` (or once in the root `speciesNotLanded`). All three
+ * weight fields are independently optional and nullable; `weightPrecision` describes the display
+ * precision for this entry's weights, not a value constraint. Shared, identical shape for both a gear's
+ * `speciesCaught` entries and the root `speciesNotLanded` entries.
  *
- * @typedef {object} SpeciesAssociation
- * @property {string} associationId - Stable ID for this gear-to-species relationship.
- * @property {object} species
- * @property {string} species.id - Stable authoritative species reference ID.
- * @property {string} species.faoCodeSnapshot - Approved FAO-code display snapshot.
- * @property {string} species.nameSnapshot - Approved species-name display snapshot.
- * @property {CatchDetail[]} catchDetails
+ * @typedef {object} SpeciesWeightEntry
+ * @property {string} id - Stable authoritative species reference ID.
+ * @property {string} faoCodeSnapshot - Approved FAO-code display snapshot.
+ * @property {string} nameSnapshot - Approved species-name display snapshot.
+ * @property {number|null} [weightAboveMinimumKg] - Weight above minimum size kept onboard, in kg.
+ * @property {number|null} [weightBelowMinimumKg] - Weight below minimum size kept onboard, in kg.
+ * @property {number|null} [weightLegallyDiscardedKg] - Weight legally discarded, in kg.
+ * @property {'wholeNumber'|'oneDecimalPlace'} [weightPrecision] - Approved display-precision enum.
  */
 
 /**
- * One gear occurrence. The authoritative root for all gear-dependent data: characteristics,
- * statistical area, and species (with their catch details) belong to the gear association that
- * contains them, never to the Catch Record root. Updating one gear association must not modify
- * another.
+ * One gear occurrence. The authoritative root for all gear-dependent data: characteristics, statistical
+ * area, and landed species belong to the gear association that contains them, never to the Catch Record
+ * root. Updating one gear association must not modify another.
  *
  * @typedef {object} GearAssociation
  * @property {string} associationId - Stable ID for this gear occurrence (distinct from `gear.id`).
@@ -84,33 +80,7 @@
  * @property {string} gear.nameSnapshot - Approved gear-name display snapshot.
  * @property {Characteristic[]} characteristics
  * @property {StatisticalArea} [statisticalArea] - Exactly one when the gear is complete (Step 07+).
- * @property {SpeciesAssociation[]} speciesCaught
- */
-
-/**
- * References an existing {@link GearAssociation} and {@link SpeciesAssociation} already present
- * under `gears`. Must never create an independent, authoritative species collection.
- *
- * @typedef {object} RetainedSpecies
- * @property {string} gearAssociationId - Must reference an existing `gears[].associationId`.
- * @property {string} speciesAssociationId - Must reference an existing `speciesCaught[].associationId`
- *   under that gear.
- * @property {object} species
- * @property {string} species.id
- * @property {string} species.faoCodeSnapshot
- * @property {string} species.nameSnapshot
- * @property {CatchDetail[]} [details]
- */
-
-/**
- * Allowed `intention` enum values and the exact `retainedSpecies`/`notLandingDetails` content rules
- * are deferred to Step 27 (canonical doc §4.7/§6). Step 05 defines only the baseline shape and the
- * gear/species cross-reference requirement.
- *
- * @typedef {object} Landing
- * @property {unknown} intention - Allowed values unresolved; deferred to Step 27.
- * @property {RetainedSpecies[]} retainedSpecies
- * @property {unknown} notLandingDetails - Shape unresolved; deferred to Step 27.
+ * @property {SpeciesWeightEntry[]} speciesCaught - Landed species caught under this specific gear.
  */
 
 /**
@@ -140,7 +110,10 @@
  * @property {Trip} trip
  * @property {PairFishing} pairFishing
  * @property {GearAssociation[]} gears - One or more. The authoritative per-gear hierarchy root.
- * @property {Landing} landing
+ * @property {SpeciesWeightEntry[]} speciesNotLanded - The one approved root-level species collection
+ *   (Step 27 redesign, service-owner decision): a single, trip-level list of species caught but not
+ *   landed this trip, independent of any gear's `speciesCaught`. No cross-reference to `gears` is
+ *   required or enforced.
  * @property {ArtifactMetadata[]} artifacts - Server-owned. Metadata only.
  * @property {string} createdAt - Server-owned.
  * @property {string} createdBy - Server-owned.

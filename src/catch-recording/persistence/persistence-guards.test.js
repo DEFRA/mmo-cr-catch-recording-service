@@ -234,13 +234,46 @@ describe('#persistence-guards', () => {
       ).toThrow(TypeError)
     })
 
-    test('Should reject a non-object section value (array)', () => {
+    test('Should accept an array-valued section (e.g. the gears collection)', () => {
       expect(() =>
         assertSectionChanges(
           {
             updatedAt: validChanges.updatedAt,
             updatedBy: validChanges.updatedBy,
-            trip: []
+            gears: [{ associationId: 'gear-1' }]
+          },
+          [...allowedSectionFields, 'gears']
+        )
+      ).not.toThrow()
+    })
+
+    test('Should accept an empty array-valued section (removing every gear)', () => {
+      expect(() =>
+        assertSectionChanges(
+          {
+            updatedAt: validChanges.updatedAt,
+            updatedBy: validChanges.updatedBy,
+            gears: []
+          },
+          [...allowedSectionFields, 'gears']
+        )
+      ).not.toThrow()
+    })
+
+    test('Should reject a plain-object section value containing an own dangerous key', () => {
+      // Using computed-property syntax so `__proto__` becomes a real own enumerable key rather than
+      // JavaScript's special "set the prototype" object-literal behaviour.
+      const pollutingValue = {
+        ['__proto__']: 'polluted',
+        startedAndFinishedToday: true
+      }
+
+      expect(() =>
+        assertSectionChanges(
+          {
+            updatedAt: validChanges.updatedAt,
+            updatedBy: validChanges.updatedBy,
+            trip: pollutingValue
           },
           allowedSectionFields
         )

@@ -124,23 +124,45 @@ function assertSectionKeyAllowed(sectionKey, allowedSectionFields) {
   }
 }
 
+/**
+ * Rejects a `sectionValue` unless it is a plain object or an array - a canonical section is either a
+ * single nested object (`trip`, `pairFishing`) or an ordered collection (`gears`, the first
+ * collection-valued section, approved by Step 23). Still rejects `null` and any scalar outright. When
+ * the value is a plain object (not an array), also rejects an own `__proto__`/`constructor`/`prototype`
+ * key, defensively - the same belt-and-braces protection `assertAllowedChanges` already applies to its
+ * own keys. An array's own elements are never inspected here: only an already-normalised/validated
+ * caller ever builds a section value, so this guard polices only the top-level shape and keys that may
+ * ever reach a MongoDB `$set`, never re-validates section content.
+ *
+ * @param {string} sectionKey
+ * @param {unknown} sectionValue
+ */
 function assertSectionValueIsPlainObject(sectionKey, sectionValue) {
-  if (
-    sectionValue === null ||
-    typeof sectionValue !== 'object' ||
-    Array.isArray(sectionValue)
-  ) {
-    throw new TypeError(`"${sectionKey}" must be a plain object`)
+  if (sectionValue === null || typeof sectionValue !== 'object') {
+    throw new TypeError(`"${sectionKey}" must be a plain object or an array`)
+  }
+
+  if (Array.isArray(sectionValue)) {
+    return
+  }
+
+  for (const disallowedKey of DISALLOWED_CHANGE_KEYS) {
+    if (Object.hasOwn(sectionValue, disallowedKey)) {
+      throw new TypeError(
+        `"${sectionKey}" must not contain a "${disallowedKey}" key`
+      )
+    }
   }
 }
 
 /**
  * Rejects a section-update `changes` object unless it is exactly `{ updatedAt, updatedBy, [section]:
- * <plain object> }` - the two trusted audit-metadata strings, plus exactly one allow-listed section
- * field whose own value is itself a plain object (a canonical section is always an object, never a
- * scalar or array). Unlike `assertAllowedChanges` (string-valued audit fields only), this guard exists
- * because a section's *value* is a nested object the caller already normalised/validated - this guard
- * only polices which *keys* may ever reach a MongoDB `$set`, never re-validates section content.
+ * <plain object|array> }` - the two trusted audit-metadata strings, plus exactly one allow-listed
+ * section field whose own value is itself a plain object or an array (see
+ * `assertSectionValueIsPlainObject`). Unlike `assertAllowedChanges` (string-valued audit fields only),
+ * this guard exists because a section's *value* is a nested structure the caller already
+ * normalised/validated - this guard only polices which *keys* may ever reach a MongoDB `$set`, never
+ * re-validates section content.
  *
  * @param {unknown} changes
  * @param {ReadonlyArray<string>} allowedSectionFields

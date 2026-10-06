@@ -17,16 +17,14 @@ function buildGear(overrides = {}) {
     statisticalArea: { id: 'area-1', codeSnapshot: 'DROP-ME' },
     speciesCaught: [
       {
-        associationId: 'species-assoc-1',
-        species: { id: 'species-1', faoCodeSnapshot: 'DROP-ME' },
-        catchDetails: [
-          {
-            attributeId: 'LSC',
-            nameSnapshot: 'DROP-ME',
-            value: 5,
-            unitSnapshot: 'kg'
-          }
-        ]
+        id: 'species-1',
+        name: 'DROP-ME',
+        faoCode: 'DROP-ME',
+        isActive: true,
+        weightAboveMinimumKg: 120.5,
+        weightBelowMinimumKg: 4,
+        weightLegallyDiscardedKg: null,
+        weightPrecision: '  oneDecimalPlace  '
       }
     ],
     ...overrides
@@ -47,9 +45,11 @@ describe('#normaliseGears', () => {
       statisticalArea: { id: 'area-1' },
       speciesCaught: [
         {
-          associationId: 'species-assoc-1',
-          species: { id: 'species-1' },
-          catchDetails: [{ attributeId: 'LSC', value: 5, unitSnapshot: 'kg' }]
+          id: 'species-1',
+          weightAboveMinimumKg: 120.5,
+          weightBelowMinimumKg: 4,
+          weightLegallyDiscardedKg: null,
+          weightPrecision: 'oneDecimalPlace'
         }
       ]
     })
@@ -74,19 +74,17 @@ describe('#normaliseGears', () => {
         associationId: 'gear-assoc-2',
         speciesCaught: [
           {
-            associationId: 'species-assoc-2',
-            species: { id: 'species-1' }, // same authoritative species id as gear-assoc-1
-            catchDetails: []
+            id: 'species-1', // same authoritative species id as gear-assoc-1
+            weightAboveMinimumKg: 10
           }
         ]
       })
     ])
 
-    expect(result[0].speciesCaught[0].species.id).toBe('species-1')
-    expect(result[1].speciesCaught[0].species.id).toBe('species-1')
-    expect(result[0].speciesCaught[0].associationId).not.toBe(
-      result[1].speciesCaught[0].associationId
-    )
+    expect(result[0].speciesCaught[0].id).toBe('species-1')
+    expect(result[1].speciesCaught[0].id).toBe('species-1')
+    expect(result[0].speciesCaught[0].weightAboveMinimumKg).toBe(120.5)
+    expect(result[1].speciesCaught[0].weightAboveMinimumKg).toBe(10)
   })
 
   test('Should preserve a value of any approved type without coercion', () => {
@@ -120,6 +118,32 @@ describe('#normaliseGears', () => {
     expect(gear.characteristics[0]).not.toHaveProperty('unexpectedField')
   })
 
+  test('Should drop a client-supplied full species reference object, keeping only approved fields', () => {
+    const [gear] = normaliseGears([
+      buildGear({
+        speciesCaught: [
+          {
+            id: 'species-1',
+            name: 'Atlantic cod (COD)',
+            faoCode: 'COD',
+            scientificName: 'Gadus morhua',
+            commonNames: [
+              { id: '1', countryCode: 'GBR', name: 'Atlantic cod' }
+            ],
+            localNames: [],
+            isActive: true,
+            weightAboveMinimumKg: 120.5
+          }
+        ]
+      })
+    ])
+
+    expect(gear.speciesCaught[0]).toEqual({
+      id: 'species-1',
+      weightAboveMinimumKg: 120.5
+    })
+  })
+
   test('Should pass through a non-array gears value unchanged', () => {
     expect(normaliseGears('not-an-array')).toBe('not-an-array')
   })
@@ -135,22 +159,14 @@ describe('#normaliseGears', () => {
     const [gear] = normaliseGears([
       buildGear({
         characteristics: ['not-an-object', null],
-        speciesCaught: [
-          'not-an-object',
-          null,
-          {
-            associationId: 's1',
-            species: { id: 'species-1' },
-            catchDetails: ['not-an-object', null]
-          }
-        ]
+        speciesCaught: ['not-an-object', null, { id: 'species-1' }]
       })
     ])
 
     expect(gear.characteristics).toEqual(['not-an-object', null])
     expect(gear.speciesCaught[0]).toBe('not-an-object')
     expect(gear.speciesCaught[1]).toBeNull()
-    expect(gear.speciesCaught[2].catchDetails).toEqual(['not-an-object', null])
+    expect(gear.speciesCaught[2]).toEqual({ id: 'species-1' })
   })
 
   test('Should preserve undefined and null', () => {

@@ -35,22 +35,15 @@ function secondGearWithSharedSpecies() {
     },
     speciesCaught: [
       {
-        associationId: '7a2b5c1d-0000-4000-8000-000000000003',
-        species: {
-          // Same authoritative species ID as the fixture's first gear's species, under a different
-          // gear association.
-          id: '60628fcb-97af-40d0-b992-099216c8fc40',
-          faoCodeSnapshot: 'COD',
-          nameSnapshot: 'Atlantic Cod'
-        },
-        catchDetails: [
-          {
-            attributeId: 'LSC',
-            nameSnapshot: 'Weight Above Minimum Size Kept Onboard',
-            value: 12,
-            unitSnapshot: 'kg'
-          }
-        ]
+        // Same authoritative species ID as the fixture's first gear's species, under a different
+        // gear association.
+        id: '60628fcb-97af-40d0-b992-099216c8fc40',
+        faoCodeSnapshot: 'COD',
+        nameSnapshot: 'Atlantic Cod',
+        weightAboveMinimumKg: 12,
+        weightBelowMinimumKg: null,
+        weightLegallyDiscardedKg: null,
+        weightPrecision: 'wholeNumber'
       }
     ]
   }
@@ -90,7 +83,9 @@ describe('#catch-record-mapper', () => {
       expect(document.trip).toEqual(newDraftExample.trip)
       expect(document.pairFishing).toEqual(newDraftExample.pairFishing)
       expect(document.gears).toEqual(newDraftExample.gears)
-      expect(document.landing).toEqual(newDraftExample.landing)
+      expect(document.speciesNotLanded).toEqual(
+        newDraftExample.speciesNotLanded
+      )
       expect(document.artifacts).toEqual(newDraftExample.artifacts)
       expect(document.createdAt).toBe(newDraftExample.createdAt)
       expect(document.createdBy).toBe(newDraftExample.createdBy)
@@ -107,8 +102,8 @@ describe('#catch-record-mapper', () => {
       const document = toPersistenceDocument(record)
 
       expect(document.gears).toHaveLength(2)
-      expect(document.gears[1].speciesCaught[0].species.id).toBe(
-        record.gears[0].speciesCaught[0].species.id
+      expect(document.gears[1].speciesCaught[0].id).toBe(
+        record.gears[0].speciesCaught[0].id
       )
     })
 
@@ -155,7 +150,7 @@ describe('#catch-record-mapper', () => {
         'trip',
         'pairFishing',
         'gears',
-        'landing',
+        'speciesNotLanded',
         'artifacts'
       ]
 
@@ -177,8 +172,10 @@ describe('#catch-record-mapper', () => {
       const canonical = toCanonicalRecord(document)
 
       expect(canonical.gears).toHaveLength(2)
-      expect(canonical.gears[0].speciesCaught[0].catchDetails[0].value).toBe(5)
-      expect(canonical.gears[1].speciesCaught[0].catchDetails[0].value).toBe(12)
+      expect(canonical.gears[0].speciesCaught[0].weightAboveMinimumKg).toBe(
+        120.5
+      )
+      expect(canonical.gears[1].speciesCaught[0].weightAboveMinimumKg).toBe(12)
     })
 
     test('Should exclude MongoDB-specific _id from canonical output', () => {

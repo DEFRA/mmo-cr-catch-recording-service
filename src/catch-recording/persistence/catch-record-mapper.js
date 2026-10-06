@@ -12,7 +12,7 @@ const NESTED_FIELDS = Object.freeze([
   'trip',
   'pairFishing',
   'gears',
-  'landing',
+  'speciesNotLanded',
   'artifacts'
 ])
 

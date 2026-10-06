@@ -7,7 +7,7 @@ const FRAMEWORK_NEUTRAL_FILES = [
   'catch-record.js',
   'sections/gears.js',
   'sections/pair-fishing.js',
-  'sections/landing.js',
+  'sections/species-not-landed.js',
   'sections/trip.js'
 ]
 

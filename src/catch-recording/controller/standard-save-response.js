@@ -1,8 +1,10 @@
 import { deriveDisplayStatus } from '#/catch-recording/domain/display-status.js'
+import { evaluateGearsProgress } from '#/catch-recording/domain/gear-completeness.js'
 
 /**
  * Step 22: the standard save-response contract shared by every approved Phase 5 Catch Record save
- * operation (first draft creation - Step 18, and generic section PATCH - Step 20/21).
+ * operation (first draft creation - Step 18, and generic section PATCH - Step 20/21), extended by Step 26
+ * with multi-gear completeness and domain-progress facts.
  *
  * Maps only from the already-committed, persisted canonical result - never recalculates persistence or
  * repeats domain validation. Exposes only approved public-safe domain facts: no frontend URL, route
@@ -55,13 +57,13 @@ function isPairFishingSectionComplete(pairFishing) {
 }
 
 /**
- * The approved Phase 5 section-completion facts - whether each non-gear journey section currently holds
- * the minimum data the canonical contract requires for that section to be considered complete. Gear,
- * statistical-area, species, catch-detail, and landing completeness are Phase 6 concerns and are not
- * represented here.
+ * The approved section-completion facts - whether each journey section currently holds the minimum data
+ * the canonical contract requires for that section to be considered complete. `gears` (Step 26) is
+ * `true` only when every gear association is itself complete (see `evaluateGearsProgress`); root-level
+ * `speciesNotLanded` completeness is not yet an approved contract concern and is not represented here.
  *
  * @param {import('#/catch-recording/domain/canonical-catch-record.js').CatchRecord} catchRecord
- * @returns {Readonly<{ trip: boolean, pairFishing: boolean }>}
+ * @returns {Readonly<{ trip: boolean, pairFishing: boolean, gears: boolean }>}
  */
 function buildSectionCompletion(catchRecord) {
   const trip = catchRecord.trip ?? {}
@@ -69,20 +71,32 @@ function buildSectionCompletion(catchRecord) {
 
   return Object.freeze({
     trip: isTripComplete(trip),
-    pairFishing: isPairFishingSectionComplete(pairFishing)
+    pairFishing: isPairFishingSectionComplete(pairFishing),
+    gears: evaluateGearsProgress(catchRecord.gears).allGearsComplete
   })
 }
 
 /**
- * The approved Phase 5 domain-progress facts. Deliberately minimal - the broader multi-gear completeness
- * calculation (Step 26) does not exist yet.
+ * The approved domain-progress facts, extended by Step 26 with multi-gear completeness
+ * (`incompleteGearAssociationIds`, `currentIncompleteGearAssociationId`, `allGearsComplete` - the exact
+ * field names already approved for this purpose in the detailed implementation plan). Submission
+ * eligibility (`submissionEligible`) is deliberately not composed here - it is not yet an approved Step 22
+ * contract field, and complete-record validation (Step 32) remains unevaluated.
  *
  * @param {import('#/catch-recording/domain/canonical-catch-record.js').CatchRecord} catchRecord
- * @returns {Readonly<{ hasUnsubmittedChanges: boolean, numberOfSubmissions: number }>}
+ * @returns {Readonly<{ hasUnsubmittedChanges: boolean, numberOfSubmissions: number,
+ *   incompleteGearAssociationIds: ReadonlyArray<string>, currentIncompleteGearAssociationId: string|null,
+ *   allGearsComplete: boolean }>}
  */
 function buildProgress(catchRecord) {
+  const gearsProgress = evaluateGearsProgress(catchRecord.gears)
+
   return Object.freeze({
     hasUnsubmittedChanges: catchRecord.hasUnsubmittedChanges,
-    numberOfSubmissions: catchRecord.numberOfSubmissions
+    numberOfSubmissions: catchRecord.numberOfSubmissions,
+    incompleteGearAssociationIds: gearsProgress.incompleteGearAssociationIds,
+    currentIncompleteGearAssociationId:
+      gearsProgress.currentIncompleteGearAssociationId,
+    allGearsComplete: gearsProgress.allGearsComplete
   })
 }

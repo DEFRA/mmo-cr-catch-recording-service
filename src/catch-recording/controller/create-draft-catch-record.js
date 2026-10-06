@@ -71,7 +71,7 @@ function buildNewDraft({ id, catchRecordReference, ownerUserId, vessel }) {
     trip: {},
     pairFishing: { enabled: false, pairVessel: null, pairSkipperName: null },
     gears: [],
-    landing: { intention: null, retainedSpecies: [], notLandingDetails: null },
+    speciesNotLanded: [],
     createdAt: now,
     createdBy: ownerUserId,
     updatedAt: now,
