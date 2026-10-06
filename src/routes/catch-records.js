@@ -8,11 +8,20 @@ import {
   saveCatchRecordSection,
   SECTION_ALLOW_LIST
 } from '#/catch-recording/controller/save-catch-record-section.js'
+import { MAX_IDEMPOTENCY_KEY_LENGTH } from '#/catch-recording/persistence/idempotency-key.js'
 
 const AUTH_STRATEGY = 'authentication-service'
 
+const HTTP_STATUS_OK = 200
+const HTTP_STATUS_CREATED = 201
+const HTTP_STATUS_NO_CONTENT = 204
+
 const createDraftHeadersSchema = Joi.object({
-  'idempotency-key': Joi.string().trim().min(1).max(200).optional()
+  'idempotency-key': Joi.string()
+    .trim()
+    .min(1)
+    .max(MAX_IDEMPOTENCY_KEY_LENGTH)
+    .optional()
 }).unknown(true)
 
 const createDraftPayloadSchema = Joi.object({
@@ -30,7 +39,7 @@ async function createDraftCatchRecordHandler(request, h) {
     correlationId: getTraceId()
   })
 
-  return h.response(response).code(201)
+  return h.response(response).code(HTTP_STATUS_CREATED)
 }
 
 const catchRecordIdParamsSchema = Joi.object({
@@ -52,7 +61,7 @@ async function abandonDraftCatchRecordHandler(request, h) {
     expectedVersion: Number(request.headers['if-match'])
   })
 
-  return h.response().code(204)
+  return h.response().code(HTTP_STATUS_NO_CONTENT)
 }
 
 const sectionPatchPayloadSchema = Joi.object({
@@ -75,7 +84,7 @@ async function saveCatchRecordSectionHandler(request, h) {
     correlationId: getTraceId()
   })
 
-  return h.response(response).code(200)
+  return h.response(response).code(HTTP_STATUS_OK)
 }
 
 /**

@@ -28,6 +28,32 @@ export function buildStandardSaveResponse(catchRecord, savedSection = null) {
   })
 }
 
+function hasValue(value) {
+  return typeof value === 'string' && value.length > 0
+}
+
+function isTripComplete(trip) {
+  const hasTripDates = hasValue(trip.dateStarted) && hasValue(trip.dateEnded)
+  const hasDeparturePort = typeof trip.departurePort?.id === 'string'
+  const hasReturnPort = typeof trip.returnPort?.id === 'string'
+
+  return hasTripDates && hasDeparturePort && hasReturnPort
+}
+
+function isPairFishingSectionComplete(pairFishing) {
+  if (pairFishing.enabled === false) {
+    return true
+  }
+
+  if (pairFishing.enabled !== true) {
+    return false
+  }
+
+  return (
+    hasValue(pairFishing.pairVessel) && hasValue(pairFishing.pairSkipperName)
+  )
+}
+
 /**
  * The approved Phase 5 section-completion facts - whether each non-gear journey section currently holds
  * the minimum data the canonical contract requires for that section to be considered complete. Gear,
@@ -41,25 +67,9 @@ function buildSectionCompletion(catchRecord) {
   const trip = catchRecord.trip ?? {}
   const pairFishing = catchRecord.pairFishing ?? {}
 
-  const hasTripDates =
-    typeof trip.dateStarted === 'string' &&
-    trip.dateStarted.length > 0 &&
-    typeof trip.dateEnded === 'string' &&
-    trip.dateEnded.length > 0
-  const hasDeparturePort = typeof trip.departurePort?.id === 'string'
-  const hasReturnPort = typeof trip.returnPort?.id === 'string'
-
-  const isPairFishingComplete =
-    pairFishing.enabled === false ||
-    (pairFishing.enabled === true &&
-      typeof pairFishing.pairVessel === 'string' &&
-      pairFishing.pairVessel.length > 0 &&
-      typeof pairFishing.pairSkipperName === 'string' &&
-      pairFishing.pairSkipperName.length > 0)
-
   return Object.freeze({
-    trip: Boolean(hasTripDates && hasDeparturePort && hasReturnPort),
-    pairFishing: Boolean(isPairFishingComplete)
+    trip: isTripComplete(trip),
+    pairFishing: isPairFishingSectionComplete(pairFishing)
   })
 }
 

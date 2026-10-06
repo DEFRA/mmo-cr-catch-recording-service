@@ -60,44 +60,46 @@ function validatePort(port, pathSegments) {
  * supplied dates are the ones actually persisted. Whether a manual date is in the future relative to the
  * trusted business date is a time-dependent check outside this pure, clockless validator's scope - the
  * calling application operation enforces it using the same trusted business-date source.
- *
- * @param {unknown} trip
- * @returns {{ valid: boolean, issues: ReadonlyArray<object> }}
  */
-function validateTripDates(trip) {
-  if (typeof trip.startedAndFinishedToday !== 'boolean') {
-    return createInvalidResult(
-      issue(
-        VALIDATION_CODES.REQUIRED,
-        ['trip', 'startedAndFinishedToday'],
-        'A trip-date decision is required'
-      )
+function requireTripDateDecision(trip) {
+  if (typeof trip.startedAndFinishedToday === 'boolean') {
+    return null
+  }
+
+  return createInvalidResult(
+    issue(
+      VALIDATION_CODES.REQUIRED,
+      ['trip', 'startedAndFinishedToday'],
+      'A trip-date decision is required'
     )
-  }
+  )
+}
 
-  if (trip.startedAndFinishedToday === true) {
-    const issues = []
-    for (const field of ['dateStarted', 'dateEnded']) {
-      if (
-        trip[field] !== null &&
-        trip[field] !== undefined &&
-        !isIsoDate(trip[field])
-      ) {
-        issues.push(
-          issue(
-            VALIDATION_CODES.INVALID_STRUCTURE,
-            ['trip', field],
-            'Must be a valid ISO date when present'
-          )
-        )
-      }
-    }
-    return issues.length === 0
-      ? createValidResult()
-      : createInvalidResult(issues)
-  }
-
+function validateTodayTripDates(trip) {
   const issues = []
+
+  for (const field of ['dateStarted', 'dateEnded']) {
+    if (
+      trip[field] !== null &&
+      trip[field] !== undefined &&
+      !isIsoDate(trip[field])
+    ) {
+      issues.push(
+        issue(
+          VALIDATION_CODES.INVALID_STRUCTURE,
+          ['trip', field],
+          'Must be a valid ISO date when present'
+        )
+      )
+    }
+  }
+
+  return issues.length === 0 ? createValidResult() : createInvalidResult(issues)
+}
+
+function validateManualTripDates(trip) {
+  const issues = []
+
   if (!isIsoDate(trip.dateStarted)) {
     issues.push(
       issue(VALIDATION_CODES.REQUIRED, ['trip', 'dateStarted'], 'Required')
@@ -119,6 +121,21 @@ function validateTripDates(trip) {
   }
 
   return issues.length === 0 ? createValidResult() : createInvalidResult(issues)
+}
+
+/**
+ * @param {unknown} trip
+ * @returns {{ valid: boolean, issues: ReadonlyArray<object> }}
+ */
+function validateTripDates(trip) {
+  const decisionResult = requireTripDateDecision(trip)
+  if (decisionResult) {
+    return decisionResult
+  }
+
+  return trip.startedAndFinishedToday === true
+    ? validateTodayTripDates(trip)
+    : validateManualTripDates(trip)
 }
 
 /**
