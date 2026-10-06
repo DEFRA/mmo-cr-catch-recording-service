@@ -14,7 +14,11 @@ import { assertPlainString } from './persistence-guards.js'
 
 /**
  * The eight approved stable event types (`design/plans/catch-recording-service-detailed-implementation-
- * plan.md` §6 "History and audit approach"). No other value is ever accepted as `eventType`.
+ * plan.md` §6 "History and audit approach"), extended by Step 30 with one further distinct event,
+ * `COMPLETE_REPLACEMENT_SAVED` (complete mobile replacement, `PUT /v1/catch-records/{catchRecordId}` -
+ * the closed Step 10 catalogue has no existing type that unambiguously means "every client-owned section
+ * replaced in one atomic write"; user-confirmed decision, Phase 7). No other value is ever accepted as
+ * `eventType`.
  */
 export const CATCH_HISTORY_EVENT_TYPES = Object.freeze({
   DRAFT_CREATED: 'DRAFT_CREATED',
@@ -24,7 +28,8 @@ export const CATCH_HISTORY_EVENT_TYPES = Object.freeze({
   COMPLETED: 'COMPLETED',
   EDIT_STARTED: 'EDIT_STARTED',
   AMENDMENT_SECTION_SAVED: 'AMENDMENT_SECTION_SAVED',
-  RESUBMITTED: 'RESUBMITTED'
+  RESUBMITTED: 'RESUBMITTED',
+  COMPLETE_REPLACEMENT_SAVED: 'COMPLETE_REPLACEMENT_SAVED'
 })
 
 const EVENT_TYPE_VALUES = Object.freeze(

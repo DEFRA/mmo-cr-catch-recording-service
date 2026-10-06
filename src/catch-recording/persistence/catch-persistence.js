@@ -11,20 +11,25 @@ import {
   assertPlainString,
   assertSafeListLimit,
   assertAllowedChanges,
-  assertSectionChanges
+  assertSectionChanges,
+  assertCompleteReplacementChanges
 } from './persistence-guards.js'
 import {
   translateInsertError,
   malformedDocumentError,
   unexpectedPersistenceError,
   versionConflictError,
-  ineligibleAbandonmentError
+  ineligibleAbandonmentError,
+  ineligibleReplacementError
 } from './catch-persistence-errors.js'
 import {
   MIN_EXPECTED_VERSION,
   validateExpectedVersion
 } from './expected-version.js'
-import { PERSISTED_STATUSES } from '../domain/lifecycle-status.js'
+import {
+  PERSISTED_STATUSES,
+  isPersistedStatus
+} from '../domain/lifecycle-status.js'
 
 /**
  * `CatchPersistence`: the sole Catch Recording owner of Catch Record MongoDB access.
@@ -286,24 +291,45 @@ export async function applySectionUpdate(
 }
 
 /**
- * Owner-scoped, bounded, deterministic list primitive. Filters by `ownerUserId` only (no status/vessel
- * filter, cursor, or offset — none is approved yet), sorted newest-first with a stable `_id`
- * tie-breaker, bounded by a caller-supplied `limit` which must not exceed `MAX_LIST_LIMIT`.
+ * Rejects an optional persisted-status filter value unless it is one of the three approved persisted
+ * lifecycle statuses (Step 28: "persisted lifecycle filtering is limited to DRAFT, SUBMITTED, and
+ * COMPLETE" — the derived `Amended` display status is never a query-time filter value here).
+ *
+ * @param {unknown} value
+ */
+function assertOptionalPersistedStatusFilter(value) {
+  if (value !== undefined && !isPersistedStatus(value)) {
+    throw new TypeError(
+      `"status" must be one of ${Object.values(PERSISTED_STATUSES).join(', ')}`
+    )
+  }
+}
+
+/**
+ * Owner-scoped, bounded, deterministic list primitive. Filters by `ownerUserId` (mandatory) and an
+ * optional approved persisted `status` — no vessel filter, cursor, or offset, none of which is approved
+ * (Step 28 decision). Sorted newest-first with a stable `_id` tie-breaker, bounded by a caller-supplied
+ * `limit` which must not exceed `MAX_LIST_LIMIT`.
  *
  * @param {import('mongodb').Db} db
- * @param {{ ownerUserId: string, limit: number }} params
+ * @param {{ ownerUserId: string, limit: number, status?: string }} params
  * @returns {Promise<Array<import('../domain/canonical-catch-record.js').CatchRecord>>}
  */
-export async function listCatchRecordsByOwner(db, { ownerUserId, limit }) {
+export async function listCatchRecordsByOwner(
+  db,
+  { ownerUserId, limit, status }
+) {
   assertPlainString(ownerUserId, 'ownerUserId')
   assertSafeListLimit(limit, MAX_LIST_LIMIT)
+  assertOptionalPersistedStatusFilter(status)
 
   const collection = getCatchRecordCollection(db)
+  const filter = status ? { ownerUserId, status } : { ownerUserId }
 
   let documents
   try {
     documents = await collection
-      .find({ ownerUserId })
+      .find(filter)
       .sort({ createdAt: -1, _id: 1 })
       .limit(limit)
       .toArray()
@@ -403,6 +429,109 @@ async function classifyAbandonmentMiss(collection, { id, ownerUserId }) {
 
   if (!isEligibleDraft) {
     throw ineligibleAbandonmentError()
+  }
+
+  throw versionConflictError()
+}
+
+/** The Step 30 approved complete-replacement client-owned section fields — every one is always present
+ * on a successful call (a complete replacement, never a partial one). */
+const COMPLETE_REPLACEMENT_ALLOWED_FIELDS = Object.freeze([
+  'vessel',
+  'trip',
+  'pairFishing',
+  'gears',
+  'speciesNotLanded'
+])
+
+/**
+ * Step 30's one atomic complete-replacement primitive. Extends `applyAuditMetadataUpdate`/
+ * `applySectionUpdate`'s exact atomic predicate/update shape with one further condition: the predicate
+ * also embeds `status: DRAFT` — lifecycle eligibility is enforced atomically, in the same database call
+ * as the expected-version match, exactly mirroring `deleteEligibleDraftForOwner`'s "predicate, not an
+ * application read, controls the write" pattern applied to a lifecycle precondition. On success, every
+ * approved client-owned section (`vessel`, `trip`, `pairFishing`, `gears`, `speciesNotLanded`) is
+ * `$set` together with trusted `updatedAt`/`updatedBy`, and `version` increments by exactly `1`.
+ *
+ * On no match, a single owner-scoped, version-less diagnostic read distinguishes three safe outcomes,
+ * mirroring `classifyAbandonmentMiss`: the record does not exist for this owner at all (covers a
+ * genuinely missing record and a cross-owner attempt - both return `null`); the record exists for this
+ * owner but is not `DRAFT` (`SUBMITTED`/`COMPLETE` - throws `INVALID_LIFECYCLE_TRANSITION`); or the
+ * record exists for this owner and is `DRAFT`, but its stored `version` no longer matches
+ * `expectedVersion` (throws `VERSION_CONFLICT`).
+ *
+ * @param {import('mongodb').Db} db
+ * @param {{
+ *   id: string,
+ *   ownerUserId: string,
+ *   expectedVersion: number,
+ *   changes: { updatedAt: string, updatedBy: string, vessel: object, trip: object,
+ *     pairFishing: object, gears: Array<object>, speciesNotLanded: Array<object> }
+ * }} params
+ * @returns {Promise<import('../domain/canonical-catch-record.js').CatchRecord|null>} The updated
+ *   canonical record (with `version` incremented by exactly `1`), or `null` when the record does not
+ *   exist for this owner.
+ * @throws {import('#/common/helpers/errors/application-error.js').ApplicationError}
+ *   `INVALID_LIFECYCLE_TRANSITION` or `VERSION_CONFLICT`.
+ */
+export async function applyCompleteReplacement(
+  db,
+  { id, ownerUserId, expectedVersion, changes }
+) {
+  assertPlainString(id, 'id')
+  assertPlainString(ownerUserId, 'ownerUserId')
+  const matchedVersion = validateExpectedVersion(expectedVersion)
+  assertCompleteReplacementChanges(changes, COMPLETE_REPLACEMENT_ALLOWED_FIELDS)
+
+  const collection = getCatchRecordCollection(db)
+
+  let document
+  try {
+    document = await collection.findOneAndUpdate(
+      {
+        _id: id,
+        ownerUserId,
+        status: PERSISTED_STATUSES.DRAFT,
+        version: matchedVersion
+      },
+      { $set: { ...changes }, $inc: { version: 1 } },
+      { returnDocument: 'after' }
+    )
+  } catch (error) {
+    throw unexpectedPersistenceError(error)
+  }
+
+  if (document) {
+    return mapStoredDocument(document)
+  }
+
+  return classifyReplacementMiss(collection, { id, ownerUserId })
+}
+
+/**
+ * Classifies why the atomic complete-replacement update above found no match. Runs only after the write
+ * has already failed to match — this diagnostic read never gates, retries, or otherwise controls the
+ * write.
+ *
+ * @param {import('mongodb').Collection} collection
+ * @param {{ id: string, ownerUserId: string }} params
+ * @returns {Promise<null>}
+ * @throws {import('#/common/helpers/errors/application-error.js').ApplicationError}
+ */
+async function classifyReplacementMiss(collection, { id, ownerUserId }) {
+  let existing
+  try {
+    existing = await collection.findOne({ _id: id, ownerUserId })
+  } catch (error) {
+    throw unexpectedPersistenceError(error)
+  }
+
+  if (existing === null) {
+    return null
+  }
+
+  if (existing.status !== PERSISTED_STATUSES.DRAFT) {
+    throw ineligibleReplacementError()
   }
 
   throw versionConflictError()
