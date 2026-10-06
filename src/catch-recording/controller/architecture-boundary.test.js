@@ -3,7 +3,11 @@ import { readFileSync } from 'node:fs'
 const FRAMEWORK_NEUTRAL_FILES = [
   'authentication-errors.js',
   'authentication-client.js',
-  'authentication-context.js'
+  'authentication-context.js',
+  'list-catch-records.js',
+  'retrieve-catch-record.js',
+  'replace-catch-record.js',
+  'catch-record-history.js'
 ]
 
 describe('#architecture-boundary (controller authentication)', () => {

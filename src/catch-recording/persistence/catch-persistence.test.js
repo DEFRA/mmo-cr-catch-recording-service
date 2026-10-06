@@ -1,5 +1,6 @@
 import {
   applyAuditMetadataUpdate,
+  applyCompleteReplacement,
   applySectionUpdate,
   createCatchRecord,
   deleteEligibleDraftForOwner,
@@ -587,6 +588,39 @@ describe('#catch-persistence', () => {
       expect(result).toEqual([])
     })
 
+    test('Should apply an approved persisted-status filter to the owner-scoped predicate', async () => {
+      const chain = buildFindChain([])
+      const collection = buildFakeCollection({ find: chain.find })
+      const db = buildFakeDb(collection)
+
+      await listCatchRecordsByOwner(db, {
+        ownerUserId: newDraftExample.ownerUserId,
+        limit: 10,
+        status: 'SUBMITTED'
+      })
+
+      expect(chain.find).toHaveBeenCalledExactlyOnceWith({
+        ownerUserId: newDraftExample.ownerUserId,
+        status: 'SUBMITTED'
+      })
+    })
+
+    test('Should reject an unsupported status filter before calling the driver', async () => {
+      const chain = buildFindChain([])
+      const collection = buildFakeCollection({ find: chain.find })
+      const db = buildFakeDb(collection)
+
+      await expect(
+        listCatchRecordsByOwner(db, {
+          ownerUserId: newDraftExample.ownerUserId,
+          limit: 10,
+          status: 'AMENDED'
+        })
+      ).rejects.toThrow(TypeError)
+
+      expect(chain.find).not.toHaveBeenCalled()
+    })
+
     test('Should translate an unexpected driver failure safely', async () => {
       const toArray = vi.fn().mockRejectedValue(new Error('connection reset'))
       const limit = vi.fn().mockReturnValue({ toArray })
@@ -925,6 +959,166 @@ describe('#catch-persistence', () => {
           id: newDraftExample.id,
           ownerUserId: newDraftExample.ownerUserId,
           expectedVersion
+        })
+      ).rejects.toMatchObject({ category: 'UNEXPECTED_INTERNAL_FAILURE' })
+    })
+  })
+
+  describe('applyCompleteReplacement', () => {
+    const expectedVersion = newDraftExample.version
+
+    function replacementChanges() {
+      return {
+        updatedAt: '2026-10-06T10:00:00Z',
+        updatedBy: newDraftExample.ownerUserId,
+        vessel: newDraftExample.vessel,
+        trip: newDraftExample.trip,
+        pairFishing: newDraftExample.pairFishing,
+        gears: newDraftExample.gears,
+        speciesNotLanded: newDraftExample.speciesNotLanded
+      }
+    }
+
+    test('Should atomically match id/owner/DRAFT/version in one findOneAndUpdate call, incrementing version once', async () => {
+      const changes = replacementChanges()
+      const updatedDocument = {
+        ...toPersistenceDocument(newDraftExample),
+        ...changes,
+        version: expectedVersion + 1
+      }
+      const collection = buildFakeCollection({
+        findOneAndUpdate: vi.fn().mockResolvedValue(updatedDocument)
+      })
+      const db = buildFakeDb(collection)
+
+      const result = await applyCompleteReplacement(db, {
+        id: newDraftExample.id,
+        ownerUserId: newDraftExample.ownerUserId,
+        expectedVersion,
+        changes
+      })
+
+      expect(collection.findOneAndUpdate).toHaveBeenCalledExactlyOnceWith(
+        {
+          _id: newDraftExample.id,
+          ownerUserId: newDraftExample.ownerUserId,
+          status: 'DRAFT',
+          version: expectedVersion
+        },
+        { $set: { ...changes }, $inc: { version: 1 } },
+        { returnDocument: 'after' }
+      )
+      expect(result.version).toBe(expectedVersion + 1)
+    })
+
+    test('Should reject changes missing an approved section field before calling the driver', async () => {
+      const collection = buildFakeCollection()
+      const db = buildFakeDb(collection)
+      const { speciesNotLanded: _omitted, ...incompleteChanges } =
+        replacementChanges()
+
+      await expect(
+        applyCompleteReplacement(db, {
+          id: newDraftExample.id,
+          ownerUserId: newDraftExample.ownerUserId,
+          expectedVersion,
+          changes: incompleteChanges
+        })
+      ).rejects.toThrow(TypeError)
+
+      expect(collection.findOneAndUpdate).not.toHaveBeenCalled()
+    })
+
+    test('Should reject a non-allow-listed change field before calling the driver', async () => {
+      const collection = buildFakeCollection()
+      const db = buildFakeDb(collection)
+
+      await expect(
+        applyCompleteReplacement(db, {
+          id: newDraftExample.id,
+          ownerUserId: newDraftExample.ownerUserId,
+          expectedVersion,
+          changes: { ...replacementChanges(), status: 'SUBMITTED' }
+        })
+      ).rejects.toThrow(TypeError)
+
+      expect(collection.findOneAndUpdate).not.toHaveBeenCalled()
+    })
+
+    test('Should return null (no disclosure) when nothing matches and no record exists for this owner at all', async () => {
+      const collection = buildFakeCollection({
+        findOneAndUpdate: vi.fn().mockResolvedValue(null),
+        findOne: vi.fn().mockResolvedValue(null)
+      })
+      const db = buildFakeDb(collection)
+
+      const result = await applyCompleteReplacement(db, {
+        id: 'does-not-exist',
+        ownerUserId: newDraftExample.ownerUserId,
+        expectedVersion,
+        changes: replacementChanges()
+      })
+
+      expect(result).toBeNull()
+    })
+
+    test('Should throw INVALID_LIFECYCLE_TRANSITION when the record exists for this owner but is not DRAFT', async () => {
+      const collection = buildFakeCollection({
+        findOneAndUpdate: vi.fn().mockResolvedValue(null),
+        findOne: vi.fn().mockResolvedValue({
+          _id: newDraftExample.id,
+          status: 'SUBMITTED'
+        })
+      })
+      const db = buildFakeDb(collection)
+
+      await expect(
+        applyCompleteReplacement(db, {
+          id: newDraftExample.id,
+          ownerUserId: newDraftExample.ownerUserId,
+          expectedVersion,
+          changes: replacementChanges()
+        })
+      ).rejects.toMatchObject({
+        category: 'INVALID_LIFECYCLE_TRANSITION',
+        code: 'CATCH_RECORD_REPLACEMENT_INELIGIBLE'
+      })
+    })
+
+    test('Should throw VERSION_CONFLICT when the record exists for this owner, is DRAFT, but the version no longer matches', async () => {
+      const collection = buildFakeCollection({
+        findOneAndUpdate: vi.fn().mockResolvedValue(null),
+        findOne: vi.fn().mockResolvedValue({
+          _id: newDraftExample.id,
+          status: 'DRAFT'
+        })
+      })
+      const db = buildFakeDb(collection)
+
+      await expect(
+        applyCompleteReplacement(db, {
+          id: newDraftExample.id,
+          ownerUserId: newDraftExample.ownerUserId,
+          expectedVersion,
+          changes: replacementChanges()
+        })
+      ).rejects.toMatchObject({ category: 'VERSION_CONFLICT' })
+    })
+
+    test('Should translate an unexpected driver failure safely', async () => {
+      const collection = buildFakeCollection({
+        findOneAndUpdate: vi
+          .fn()
+          .mockRejectedValue(new Error('connection reset'))
+      })
+      const db = buildFakeDb(collection)
+
+      await expect(
+        applyCompleteReplacement(db, {
+          id: newDraftExample.id,
+          ownerUserId: newDraftExample.ownerUserId,
+          expectedVersion,
+          changes: replacementChanges()
         })
       ).rejects.toMatchObject({ category: 'UNEXPECTED_INTERNAL_FAILURE' })
     })

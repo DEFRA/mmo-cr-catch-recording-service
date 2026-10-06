@@ -175,3 +175,43 @@ export function assertSectionChanges(changes, allowedSectionFields) {
   assertSectionKeyAllowed(sectionKey, allowedSectionFields)
   assertSectionValueIsPlainObject(sectionKey, changes[sectionKey])
 }
+
+/**
+ * Rejects a complete-replacement `changes` object unless it is exactly `{ updatedAt, updatedBy,
+ * ...everyApprovedSectionField }` (Step 30) - the two trusted audit-metadata strings, plus **every one**
+ * of the approved complete-replacement section fields, each a plain object or array (see
+ * `assertSectionValueIsPlainObject`). Unlike `assertSectionChanges` ("exactly one" section field, for a
+ * partial section PATCH), a complete replacement always supplies every approved client-owned section -
+ * never a subset, never an extra, never a non-allow-listed key.
+ *
+ * @param {unknown} changes
+ * @param {ReadonlyArray<string>} allowedSectionFields
+ */
+export function assertCompleteReplacementChanges(
+  changes,
+  allowedSectionFields
+) {
+  assertChangesIsPlainObject(changes)
+  assertAuditFieldsPresent(changes)
+
+  const sectionKeys = Object.keys(changes).filter(
+    (key) => !SECTION_UPDATE_AUDIT_FIELDS.includes(key)
+  )
+
+  for (const key of sectionKeys) {
+    assertSectionKeyAllowed(key, allowedSectionFields)
+  }
+
+  const missingFields = allowedSectionFields.filter(
+    (field) => !sectionKeys.includes(field)
+  )
+  if (missingFields.length > 0) {
+    throw new TypeError(
+      `"changes" must include every approved field: missing ${missingFields.join(', ')}`
+    )
+  }
+
+  for (const key of sectionKeys) {
+    assertSectionValueIsPlainObject(key, changes[key])
+  }
+}

@@ -272,6 +272,67 @@ weightAboveMinimumKg?, weightBelowMinimumKg?, weightLegallyDiscardedKg?, weightP
   shape for them. `speciesNotLanded` is independent of `gears` - the same species may appear in both
   collections, and no cross-reference check is applied between them.
 
+## Phase 7 decisions (Steps 28–31): queries, synchronisation, and history
+
+> Recorded ahead of implementation, after a Clarification Resolver pass against repository evidence
+> (existing `listCatchRecordsByOwner`/`listCatchHistoryEventsForOwner` persistence primitives, the
+> Step 22 standard save-response contract, the Step 11 expected-version/conflict contract, and
+> `docs/adr/0001-flat-species-weight-entries-and-species-not-landed.md`) plus explicit user confirmation
+> for the items no repository evidence could resolve.
+
+- **Bounded-list page size (`GET /v1/catch-records` and `GET /v1/catch-records/{id}/history`)**: `limit`
+  is an optional query parameter, default `20`, max `100` (the existing `MAX_LIST_LIMIT`/
+  `MAX_HISTORY_LIST_LIMIT` technical ceilings). No offset/cursor paging is implemented — both existing
+  persistence primitives only ever supported a bounded `limit`, and no approved document anywhere
+  mandates multi-page client paging.
+- **Listing filter**: only the persisted lifecycle `status` (`DRAFT`/`SUBMITTED`/`COMPLETE`) — no vessel
+  or date filter, since neither has any approved evidence. No client-controlled sort parameter; the
+  existing deterministic default order (`createdAt` descending, `_id` ascending tie-break) is used as-is.
+- **Response envelopes**: the Step 28 list envelope is `{ items, limit, count }`; the Step 29 complete
+  retrieval returns the full canonical record plus `{ displayStatus, sectionCompletion,
+  completedSections, incompleteSections, progress, submissionEligible }`; the Step 30 `PUT` success
+  response reuses the existing Step 22 `buildStandardSaveResponse` shape unchanged; the Step 31 history
+  envelope is `{ catchRecordId, status, displayStatus, version, hasUnsubmittedChanges,
+  numberOfSubmissions, events: [{ id, eventType, timestamp, actor, section?, submissionNumber? }] }`.
+- **Step 30 maximum mobile payload size**: `1 MB` (`1,048,576` bytes), enforced via the route's
+  `payload.maxBytes`. No earlier approved value existed anywhere (this was the one decision the Step 04
+  plan explicitly flagged as blocking, then deferred — see above).
+- **Step 30 idempotency**: not implemented. Optimistic concurrency (the existing expected-version
+  contract) is sufficient; no approved mobile-retry requirement exists, matching the existing PATCH
+  section-save precedent (also no idempotency).
+- **Step 30 vessel inclusion**: `vessel` is part of the complete-replacement payload and is re-resolved/
+  re-authorised on every `PUT` (`listAccessibleVesselIds` + `resolveVessel`, exactly as at draft
+  creation) — `normaliseCatchRecord`'s approved client-owned section set already includes it; PATCH's
+  narrower section allow-list does not make it immutable for a complete replacement.
+- **Step 30 expected-version/conflict contract**: reuses the existing `If-Match` header
+  (`/^[1-9]\d*$/`) and the existing `VERSION_CONFLICT`/`CATCH_RECORD_VERSION_CONFLICT` (HTTP 409)
+  contract unchanged — no new header or status code.
+- **Step 30 lifecycle protection**: only a `status = DRAFT` record (never-submitted or amended) may be
+  replaced, enforced atomically inside the same compare-and-update predicate as the expected-version
+  check (mirrors Step 19's `deleteEligibleDraftForOwner`). `SUBMITTED`/`COMPLETE` are rejected with
+  `INVALID_LIFECYCLE_TRANSITION` — Step 37's edit-start (Phase 8, not yet implemented) remains the only
+  approved way back to `DRAFT`.
+- **Step 30 reconciliation scope**: the step prompt's "landing"/"retained-catch" language predates
+  ADR 0001. The current canonical contract has no separate landing/retained-catch structure — Step 30
+  reconciles exactly `gears[].speciesCaught[]` (per gear, via the existing Step 23/25/27 resolution
+  pipeline) and root-level `speciesNotLanded[]`; no new reconciliation concept is introduced.
+- **Step 30 business validation**: reuses the existing per-section validators
+  (`validateTrip`/`validatePairFishing`/`validateGears`/`validateSpeciesNotLanded`) — the same ones the
+  existing PATCH pipeline already dispatches — rather than the aggregate `validateCatchRecord`/
+  `validateStructure`. Discovered during implementation: `validateStructure`'s gear-structure rule
+  requires `associationId` on every gear unconditionally, which is correct for an already-*reconciled*
+  persisted canonical record (what Step 32 will validate) but wrong for a pre-reconciliation payload that
+  may legitimately add a brand-new gear with no client-supplied `associationId` yet (exactly as the
+  existing PATCH `gears` section already permits).
+- **Step 30/31 history event**: one new, distinct event type, `COMPLETE_REPLACEMENT_SAVED`, added to the
+  existing closed nine-type catalogue (`CATCH_HISTORY_EVENT_TYPES`) — no existing type unambiguously
+  represented "every client-owned section replaced in one atomic write". No section/submission-number
+  metadata applies to a whole-object replacement, so none is attached.
+- **Step 31 public event types/actor representation**: the existing stable internal `eventType` strings
+  are exposed as-is (no internal/public translation table — mirrors how persisted lifecycle `status` is
+  already exposed directly). The trusted `actorUserId` is exposed directly as `actor` (a single-actor-
+  per-record system; no pseudonymisation or categorisation is invented).
+
 ## Security and privacy
 
 No credential, token, access key, or secret key is introduced by this step (none was added — there is no

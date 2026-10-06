@@ -18,11 +18,12 @@ function validInput(overrides = {}) {
 
 describe('#catch-history-event', () => {
   describe('CATCH_HISTORY_EVENT_TYPES', () => {
-    test('Should expose exactly the eight approved stable event types', () => {
+    test('Should expose exactly the nine approved stable event types', () => {
       expect(Object.values(CATCH_HISTORY_EVENT_TYPES).sort()).toEqual(
         [
           'AMENDMENT_SECTION_SAVED',
           'COMPLETED',
+          'COMPLETE_REPLACEMENT_SAVED',
           'DRAFT_ABANDONED',
           'DRAFT_CREATED',
           'EDIT_STARTED',

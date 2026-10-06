@@ -91,13 +91,25 @@ This is a structural safety check only — not a re-run of Step 07 business vali
   `VERSION_CONFLICT` `ApplicationError` when the owner-scoped record exists but `expectedVersion` no
   longer matches. Does not touch history or section data — a future section-update primitive is expected
   to reuse the same atomic predicate shape rather than add a competing update path.
-- **`listCatchRecordsByOwner(db, { ownerUserId, limit })`** — filters by `ownerUserId` only (no status/
-  vessel filter, cursor, or offset — none is approved yet), sorted `{ createdAt: -1, _id: 1 }`
-  (deterministic: newest first, stable tie-breaker), bounded by a caller-supplied `limit` that must be an
-  integer in `(0, MAX_LIST_LIMIT]`. `MAX_LIST_LIMIT` (100) is a **persistence-owned technical safety
-  ceiling, not a business page size** — `docs/configuration-decisions.md` explicitly defers a final
-  collection/payload-limit decision; this ceiling exists only so a future caller defect can never produce
-  an unbounded query.
+- **`listCatchRecordsByOwner(db, { ownerUserId, limit, status? })`** — filters by `ownerUserId`, plus an
+  optional approved persisted-status filter (Phase 7 Step 28: `DRAFT`/`SUBMITTED`/`COMPLETE` only — the
+  derived `Amended` display status is never a query-time filter value here; no vessel filter, cursor, or
+  offset is approved), sorted `{ createdAt: -1, _id: 1 }` (deterministic: newest first, stable
+  tie-breaker), bounded by a caller-supplied `limit` that must be an integer in `(0, MAX_LIST_LIMIT]`.
+  `MAX_LIST_LIMIT` (100) is a **persistence-owned technical safety ceiling, not a business page size** —
+  the public `GET /v1/catch-records` route applies its own approved page-size contract (default `20`, max
+  `100`) on top of this ceiling.
+- **`applyCompleteReplacement(db, { id, ownerUserId, expectedVersion, changes })`** — Phase 7 Step 30's
+  one atomic complete-replacement primitive (`PUT /v1/catch-records/{catchRecordId}`). Extends
+  `applyAuditMetadataUpdate`/`applySectionUpdate`'s atomic predicate/update shape with one further
+  condition: the predicate also embeds `status: DRAFT` — lifecycle eligibility is enforced atomically, in
+  the same database call as the expected-version match (mirrors `deleteEligibleDraftForOwner`'s
+  "predicate, not an application read, controls the write" pattern). `changes` must supply **every**
+  approved client-owned section (`vessel`, `trip`, `pairFishing`, `gears`, `speciesNotLanded`) plus
+  `updatedAt`/`updatedBy` — unlike `applySectionUpdate`'s "exactly one" section field. On no match, a
+  single owner-scoped diagnostic read distinguishes not-found (`null`), ineligible lifecycle
+  (`INVALID_LIFECYCLE_TRANSITION`/`CATCH_RECORD_REPLACEMENT_INELIGIBLE`), or a stale version
+  (`VERSION_CONFLICT`).
 - **`ensureCatchRecordIndexes(db)`** — idempotent; safe to call on every server start. Wired into the
   existing `src/plugins/mongodb.js` `createIndexes(db)` function (one integration point, no second Mongo
   client).
@@ -448,9 +460,13 @@ server-generated `id` (the MongoDB `_id` converted to its hex string — never a
 
 `CATCH_HISTORY_EVENT_TYPES`: `DRAFT_CREATED`, `SECTION_SAVED`, `DRAFT_ABANDONED`, `SUBMITTED`,
 `COMPLETED`, `EDIT_STARTED`, `AMENDMENT_SECTION_SAVED`, `RESUBMITTED` — the exact eight concepts named by
-the detailed plan's §6 "History and audit approach". No producer for any of these events exists yet
-(draft creation, section save, submission, etc. are all later steps); Step 10 implements only the
-append/query mechanism and contract those future operations will call.
+the detailed plan's §6 "History and audit approach" — extended by Phase 7 Step 30 with one further
+distinct event, `COMPLETE_REPLACEMENT_SAVED` (complete mobile replacement, `PUT
+/v1/catch-records/{catchRecordId}` — the original eight had no type that unambiguously meant "every
+client-owned section replaced in one atomic write"; user-confirmed decision). `DRAFT_CREATED`,
+`SECTION_SAVED`, and `COMPLETE_REPLACEMENT_SAVED` are the only types with a producer implemented so far
+(draft creation, generic section PATCH, and complete mobile replacement respectively); the remaining five
+remain reserved for their own later steps.
 
 ### Safe metadata allow-list
 

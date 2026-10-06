@@ -4,7 +4,9 @@ import { evaluateGearsProgress } from '#/catch-recording/domain/gear-completenes
 /**
  * Step 22: the standard save-response contract shared by every approved Phase 5 Catch Record save
  * operation (first draft creation - Step 18, and generic section PATCH - Step 20/21), extended by Step 26
- * with multi-gear completeness and domain-progress facts.
+ * with multi-gear completeness and domain-progress facts. `buildSectionCompletion`/`buildProgress` are
+ * also exported and reused directly by Step 29's complete-retrieval response and Step 30's complete
+ * mobile-replacement response, so completeness/progress derivation stays defined in exactly one place.
  *
  * Maps only from the already-committed, persisted canonical result - never recalculates persistence or
  * repeats domain validation. Exposes only approved public-safe domain facts: no frontend URL, route
@@ -65,7 +67,7 @@ function isPairFishingSectionComplete(pairFishing) {
  * @param {import('#/catch-recording/domain/canonical-catch-record.js').CatchRecord} catchRecord
  * @returns {Readonly<{ trip: boolean, pairFishing: boolean, gears: boolean }>}
  */
-function buildSectionCompletion(catchRecord) {
+export function buildSectionCompletion(catchRecord) {
   const trip = catchRecord.trip ?? {}
   const pairFishing = catchRecord.pairFishing ?? {}
 
@@ -88,7 +90,7 @@ function buildSectionCompletion(catchRecord) {
  *   incompleteGearAssociationIds: ReadonlyArray<string>, currentIncompleteGearAssociationId: string|null,
  *   allGearsComplete: boolean }>}
  */
-function buildProgress(catchRecord) {
+export function buildProgress(catchRecord) {
   const gearsProgress = evaluateGearsProgress(catchRecord.gears)
 
   return Object.freeze({

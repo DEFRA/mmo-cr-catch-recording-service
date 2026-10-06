@@ -99,6 +99,23 @@ export function ineligibleAbandonmentError() {
 }
 
 /**
+ * Builds the safe, deterministic `ApplicationError` for Step 30's lifecycle-protection precondition
+ * failure: an owner-scoped Catch Record exists, but it is not (or is no longer) a `DRAFT` (a
+ * `SUBMITTED`/`COMPLETE` record may only return to `DRAFT` via the approved edit-start transition,
+ * Step 37 - not yet implemented). Reuses the existing (Step 03) `INVALID_LIFECYCLE_TRANSITION` category
+ * - no new category is added. Never includes the record ID, owner ID, or its current status.
+ *
+ * @returns {ApplicationError}
+ */
+export function ineligibleReplacementError() {
+  return new ApplicationError({
+    category: 'INVALID_LIFECYCLE_TRANSITION',
+    code: 'CATCH_RECORD_REPLACEMENT_INELIGIBLE',
+    message: 'Only a draft catch record may be completely replaced.'
+  })
+}
+
+/**
  * Builds the safe, deterministic `ApplicationError` for an optimistic-concurrency conflict: an
  * owner-scoped Catch Record exists, but its stored `version` no longer matches the caller's supplied
  * expected version. Reuses the existing (Step 03) `VERSION_CONFLICT` category — no new category is
