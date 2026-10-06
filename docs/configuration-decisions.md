@@ -118,15 +118,21 @@ its real (mocked) HTTP contract directly, mirroring the already-implemented clie
 
 ### Reference Data Service client (Step 15)
 
-- **Endpoints**: `GET /api/v1/reference-data/{vessels,gears,ports,species}` and
-  `GET /api/v1/reference-data/{vessels,gears,ports,species}/{id}`, plus **statistical areas** (added as an
-  addendum after the detailed implementation plan's own decision list flagged "exact endpoint for
-  statistical-area retrieval" as required before Step 15, which the original research pass missed):
-  `GET /api/v1/reference-data/map/statistical-areas/{id}` only (the item lookup; Catch Recording never
-  needs the bounded collection/search endpoint, since a statistical area is always resolved by the one
-  stable ID the user already selected). No separate gear-characteristics or species-attributes endpoints
-  exist or are called — gear characteristics are nested inside the `gears` collection/item response;
-  species "attributes" are not Reference Data Service concepts at all (see below).
+- **Endpoints**: `GET /api/v1/reference-data/{vessels,ports,species}/{id}` for vessels/ports/species
+  (self-contained item responses). **Gears use the collection endpoint with an `ids` filter instead of
+  the item endpoint** — `GET /api/v1/reference-data/gears?ids=<id>&includeInactive=true` — because a
+  gear's `applicableCharacteristics[].characteristicId` only resolves to a name/unit via the **collection
+  envelope's** top-level `characteristics[]` catalog, which the item endpoint (`/gears/{id}`) does not
+  return (confirmed directly from the Reference Data Service's own controller: the item handler returns
+  only the matched gear, never the collection-level catalog). `includeInactive=true` is required on this
+  filtered-collection call so an inactive gear already referenced by a historical Catch Record remains
+  resolvable by ID, matching the item endpoint's own behaviour for the other types. Plus **statistical
+  areas** (added as an addendum after the detailed implementation plan's own decision list flagged "exact
+  endpoint for statistical-area retrieval" as required before Step 15, which the original research pass
+  missed): `GET /api/v1/reference-data/map/statistical-areas/{id}` only (the item lookup; Catch Recording
+  never needs the bounded collection/search endpoint, since a statistical area is always resolved by the
+  one stable ID the user already selected). No separate species-attributes endpoint exists or is called —
+  species "attributes" are not a Reference Data Service concept at all (see below).
 - **Request contract**: canonical representation only — **no `view` query parameter is ever sent**
   (no mobile view is used). Supported query parameters: `ids` (comma-separated GUIDs, max 50), per-dataset
   exact filters, `includeInactive` (`true`/`false`, default `false`), `sort`, `offset`/`limit`
@@ -135,10 +141,15 @@ its real (mocked) HTTP contract directly, mirroring the already-implemented clie
   `mmo-cr-reference-data-service` (`dataset, collectionId, schemaVersion, version, itemCount, items[]`),
   with dataset item shapes: vessel (`id, name, namePln, identifiers{cfr,uvi,mmsi,ircs,externalMark,
 registrationNumber}, lengthOverallMetres, status, activeFrom, activeTo`), gear (`id, code, name, type,
-categoryId, pairFishing, applicableCharacteristics[], active`, plus collection-level `categories[]` /
-  `characteristics[]`), port (`id, code, name, countryCode, coordinate, active`), species (`id, faoCode,
-scientificName, commonNames[], localNames[], active`). **Statistical area** uses a GeoJSON `Feature`
-  shape, not the flat JSON item shape of the other four types: `{ type: 'Feature', id, properties: { id,
+categoryId, pairFishing, applicableCharacteristics[{id,characteristicId,fixed,required,
+vesselLengthApplicability?}], active`, joined by the client with the collection-level
+  `characteristics[{id,code,name,dataType,unit,minValue,maxValue}]` catalog into one resolved
+  `characteristics[{characteristicId,fixed,required,name,unit,dataType,minValue,maxValue,
+vesselLengthApplicability}]` array on the client's returned gear result — `categories[]` is not consumed
+  (gear snapshots use only the gear's own code/name, never its category)), port (`id, code, name,
+countryCode, coordinate, active`), species (`id, faoCode, scientificName, commonNames[], localNames[],
+active`). **Statistical area** uses a GeoJSON `Feature`
+  shape, not the flat JSON item shape of the other three types: `{ type: 'Feature', id, properties: { id,
 code, name, areaType, parentCode?, parentName?, areaKm2?, centroid? }, geometry }` — only
   `properties.id`/`code`/`name` are consumed by Step 15/16; `areaType`, `parentCode`, `parentName`,
   `areaKm2`, `centroid`, and `geometry` are read-but-unused today (exposed on the client result only if a
