@@ -30,6 +30,10 @@ responsibilities, exclusions, and the approved dependency direction.
   [`docs/catch-recording-persistence.md`](../../docs/catch-recording-persistence.md). Does not implement
   any business endpoint/operation, idempotency retention/TTL, routes, the HTTP transport representation for
   the expected version, or authentication/authorisation — those are later steps or deferred decisions.
+- `controller/` — the Step 13 trusted authentication context: a bounded Authentication Service client, a
+  framework-neutral `{ userId, scopes }` context mapper, and a dormant Hapi `authentication-service` auth
+  scheme/plugin (no route is enforced yet). See
+  [`docs/catch-recording-authentication.md`](../../docs/catch-recording-authentication.md).
 
 Rules for adding code here:
 
