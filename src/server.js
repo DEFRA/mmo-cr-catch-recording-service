@@ -7,6 +7,7 @@ import { router } from '#/plugins/router.js'
 import { requestLogger } from '#/plugins/request-logger.js'
 import { mongoDb } from '#/plugins/mongodb.js'
 import { errorMapping } from '#/plugins/error-mapping.js'
+import { authenticationPlugin } from '#/catch-recording/controller/authentication-plugin.js'
 import { failAction } from '#/common/helpers/fail-action.js'
 import { pulse } from '#/plugins/pulse.js'
 import { requestTracing } from '#/plugins/request-tracing.js'
@@ -40,13 +41,15 @@ export async function createServer() {
   })
 
   // Hapi Plugins:
-  // requestLogger  - automatically logs incoming requests
-  // requestTracing - trace header logging and propagation
-  // secureContext  - loads CA certificates from environment config
-  // pulse          - provides shutdown handlers
-  // mongoDb        - sets up mongo connection pool and attaches to `server` and `request` objects
-  // errorMapping   - central onPreResponse boundary mapping errors to the safe public HTTP contract
-  // router         - routes used in the app
+  // requestLogger       - automatically logs incoming requests
+  // requestTracing      - trace header logging and propagation
+  // secureContext       - loads CA certificates from environment config
+  // pulse               - provides shutdown handlers
+  // mongoDb             - sets up mongo connection pool and attaches to `server` and `request` objects
+  // errorMapping        - central onPreResponse boundary mapping errors to the safe public HTTP contract
+  // authenticationPlugin - registers the trusted `authentication-service` Hapi auth scheme/strategy
+  //                        (Step 13); dormant until a route opts in via `auth: 'authentication-service'`
+  // router              - routes used in the app
   await server.register([
     requestLogger,
     requestTracing,
@@ -58,6 +61,13 @@ export async function createServer() {
       options: config.get('mongo')
     },
     errorMapping,
+    {
+      plugin: authenticationPlugin,
+      options: {
+        ...config.get('authentication'),
+        tracingHeader: config.get('tracing.header')
+      }
+    },
     router
   ])
 

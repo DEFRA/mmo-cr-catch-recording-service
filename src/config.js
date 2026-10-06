@@ -126,6 +126,67 @@ export const config = convict({
       default: 'x-cdp-request-id',
       env: 'TRACING_HEADER'
     }
+  },
+  authentication: {
+    baseUrl: {
+      doc: 'Base URL of the Authentication Service used to validate trusted caller bearer tokens',
+      format: String,
+      nullable: true,
+      default: null,
+      env: 'AUTHENTICATION_SERVICE_URL'
+    },
+    timeoutMs: {
+      doc: 'Timeout in milliseconds for Authentication Service token-validation requests',
+      format: 'nat',
+      default: 2000,
+      env: 'AUTHENTICATION_SERVICE_TIMEOUT_MS'
+    },
+    retryCount: {
+      doc: 'Number of bounded retries for approved transient (502/503/504) Authentication Service failures',
+      format: 'nat',
+      default: 1,
+      env: 'AUTHENTICATION_SERVICE_RETRY_COUNT'
+    },
+    retryDelayMs: {
+      doc: 'Delay in milliseconds between bounded Authentication Service retries',
+      format: 'nat',
+      default: 100,
+      env: 'AUTHENTICATION_SERVICE_RETRY_DELAY_MS'
+    }
+  },
+  referenceData: {
+    baseUrl: {
+      doc: 'Base URL of the Reference Data Service',
+      format: String,
+      nullable: true,
+      default: null,
+      env: 'REFERENCE_DATA_SERVICE_URL'
+    },
+    serviceToken: {
+      doc: 'Catch Recording Service own service-to-service credential presented to the Reference Data Service (never the inbound caller token)',
+      format: String,
+      nullable: true,
+      default: null,
+      env: 'REFERENCE_DATA_SERVICE_TOKEN'
+    },
+    timeoutMs: {
+      doc: 'Timeout in milliseconds for Reference Data Service requests',
+      format: 'nat',
+      default: 2000,
+      env: 'REFERENCE_DATA_SERVICE_TIMEOUT_MS'
+    },
+    retryCount: {
+      doc: 'Number of bounded retries for approved transient (502/503/504) Reference Data Service failures',
+      format: 'nat',
+      default: 1,
+      env: 'REFERENCE_DATA_SERVICE_RETRY_COUNT'
+    },
+    retryDelayMs: {
+      doc: 'Delay in milliseconds between bounded Reference Data Service retries',
+      format: 'nat',
+      default: 100,
+      env: 'REFERENCE_DATA_SERVICE_RETRY_DELAY_MS'
+    }
   }
 })
 

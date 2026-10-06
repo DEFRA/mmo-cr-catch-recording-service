@@ -1,0 +1,46 @@
+/**
+ * Small, reusable primitive checks shared by every resource-specific response validator in this
+ * directory. Deliberately not a generic schema engine - each resource module still writes its own
+ * explicit, field-by-field validation composed from these primitives.
+ */
+
+export function isNonEmptyString(value) {
+  return typeof value === 'string' && value.length > 0
+}
+
+export function isNullableString(value) {
+  return value === null || isNonEmptyString(value)
+}
+
+export function isFiniteNumber(value) {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
+export function isNullableFiniteNumber(value) {
+  return value === null || isFiniteNumber(value)
+}
+
+export function isBoolean(value) {
+  return typeof value === 'boolean'
+}
+
+export function isStringArray(value) {
+  return Array.isArray(value) && value.every((entry) => isNonEmptyString(entry))
+}
+
+export function isPlainObject(value) {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/**
+ * An optional field is either genuinely absent (`undefined`) or must satisfy `validator` - used to keep
+ * each resource validator's field checks as small, separately-reasoned predicates rather than one large
+ * conditional expression.
+ *
+ * @param {unknown} value
+ * @param {(value: unknown) => boolean} validator
+ * @returns {boolean}
+ */
+export function isOptionalField(value, validator) {
+  return value === undefined || validator(value)
+}

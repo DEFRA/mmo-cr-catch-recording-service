@@ -30,6 +30,22 @@ responsibilities, exclusions, and the approved dependency direction.
   [`docs/catch-recording-persistence.md`](../../docs/catch-recording-persistence.md). Does not implement
   any business endpoint/operation, idempotency retention/TTL, routes, the HTTP transport representation for
   the expected version, or authentication/authorisation — those are later steps or deferred decisions.
+- `controller/` — the Step 13 trusted authentication context: a bounded Authentication Service client, a
+  framework-neutral `{ userId, scopes }` context mapper, and a dormant Hapi `authentication-service` auth
+  scheme/plugin (no route is enforced yet). See
+  [`docs/catch-recording-authentication.md`](../../docs/catch-recording-authentication.md).
+- `security/` — the Step 14 resource-authorisation policies: ten explicit, default-deny, framework-neutral
+  policies (vessel access, Catch Record ownership, read, draft-update, draft-abandonment, submission,
+  amendment, artifact access, vessel-profile access, restricted completion), one shared policy-outcome
+  contract, and one error-enforcement helper reusing the existing Step 03 error categories. See
+  [`docs/catch-recording-authorisation.md`](../../docs/catch-recording-authorisation.md).
+- `reference-data/` — the Step 15 Reference Data Service client (five explicit, read-only resource
+  operations, bounded timeout/retry, correlation propagation, service authentication, strict hand-rolled
+  response validation) and the Step 16 reference validation and snapshot resolution (stable-ID
+  validation, active-selection rules, the one supported relationship check — gear characteristic → gear,
+  vessel-access composition with Step 14, canonical snapshot mapping, and historical-snapshot
+  preservation). See [`docs/catch-recording-reference-data.md`](../../docs/catch-recording-reference-data.md)
+  and [`docs/catch-recording-reference-resolution.md`](../../docs/catch-recording-reference-resolution.md).
 
 Rules for adding code here:
 

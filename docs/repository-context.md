@@ -80,7 +80,11 @@ Source: `package.json` (`"imports": { "#/*": "./src/*" }`), the file tree above.
 - Existing keys: `serviceVersion`, `host`, `port`, `serviceName`, `cdpEnvironment` (enum including
   `local`), `log.isEnabled`/`log.level`/`log.format`/`log.redact`, `mongo.mongoUrl`/
   `mongo.databaseName`/`mongo.mongoOptions.retryWrites`/`mongo.mongoOptions.readPreference`,
-  `httpProxy`, `tracing.header` (`src/config.js`).
+  `httpProxy`, `tracing.header`, `authentication.baseUrl`/`authentication.timeoutMs`/
+  `authentication.retryCount`/`authentication.retryDelayMs` (Step 13 Authentication Service client),
+  `referenceData.baseUrl`/`referenceData.serviceToken`/`referenceData.timeoutMs`/
+  `referenceData.retryCount`/`referenceData.retryDelayMs` (Step 15 Reference Data Service client)
+  (`src/config.js`).
 - Every key has a `doc`, a `format`, and an `env` where environment-driven, consistent with
   `.github/instructions/nodejs-hapi-api.instructions.md` ("Configuration" section).
 - `isTest`/`isProduction` flags derive from `process.env.NODE_ENV` and alter defaults (e.g. logging
