@@ -3,13 +3,14 @@ import { validateStructure } from './structural.js'
 import { validateGears } from './sections/gears.js'
 import { validatePairFishing } from './sections/pair-fishing.js'
 import { validateLanding } from './sections/landing.js'
+import { validateTrip } from './sections/trip.js'
 
 /**
  * Composes the approved reusable validators into one complete-validation result, in a fixed,
  * deterministic order: structure, then gears (duplicates), then pair-fishing (conditional), then
- * landing (cross-reference). This is the reusable foundation Step 32 will extend with submission-
- * readiness rules and dependencies not yet implemented — it does not itself decide submission
- * readiness, lifecycle eligibility, or reference-data validity.
+ * landing (cross-reference), then trip (Step 21). This is the reusable foundation Step 32 will extend
+ * with submission-readiness rules and dependencies not yet implemented — it does not itself decide
+ * submission readiness, lifecycle eligibility, or reference-data validity.
  *
  * @param {unknown} catchRecord
  * @returns {{ valid: boolean, issues: ReadonlyArray<object> }}
@@ -27,12 +28,13 @@ export function validateCatchRecord(catchRecord) {
   }
 
   // Past this point, validateStructure has already confirmed catchRecord is a plain object.
-  const { gears, landing, pairFishing } = catchRecord
+  const { gears, landing, pairFishing, trip } = catchRecord
 
   return combineResults(
     structuralResult,
     validateGears(gears),
     validatePairFishing(pairFishing),
-    validateLanding(landing, gears)
+    validateLanding(landing, gears),
+    validateTrip(trip)
   )
 }

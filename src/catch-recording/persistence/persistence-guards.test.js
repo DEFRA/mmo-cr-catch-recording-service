@@ -1,7 +1,8 @@
 import {
   assertAllowedChanges,
   assertPlainString,
-  assertSafeListLimit
+  assertSafeListLimit,
+  assertSectionChanges
 } from './persistence-guards.js'
 
 describe('#persistence-guards', () => {
@@ -128,6 +129,121 @@ describe('#persistence-guards', () => {
     test('Should reject a non-string value for an allowed field', () => {
       expect(() =>
         assertAllowedChanges({ updatedAt: 12345 }, allowedFields)
+      ).toThrow(TypeError)
+    })
+  })
+
+  describe('assertSectionChanges', () => {
+    const allowedSectionFields = ['trip', 'pairFishing']
+    const validChanges = {
+      updatedAt: '2026-10-06T00:00:00.000Z',
+      updatedBy: 'user-1',
+      trip: { startedAndFinishedToday: true }
+    }
+
+    test('Should accept audit metadata plus exactly one allowed, object-valued section field', () => {
+      expect(() =>
+        assertSectionChanges(validChanges, allowedSectionFields)
+      ).not.toThrow()
+    })
+
+    test('Should reject a non-plain-object changes value', () => {
+      expect(() => assertSectionChanges(null, allowedSectionFields)).toThrow(
+        TypeError
+      )
+      expect(() => assertSectionChanges('trip', allowedSectionFields)).toThrow(
+        TypeError
+      )
+      expect(() => assertSectionChanges([], allowedSectionFields)).toThrow(
+        TypeError
+      )
+    })
+
+    test.each(['updatedAt', 'updatedBy'])(
+      'Should reject changes missing the required "%s" audit field',
+      (missingField) => {
+        const { [missingField]: _omit, ...withoutField } = validChanges
+        expect(() =>
+          assertSectionChanges(withoutField, allowedSectionFields)
+        ).toThrow(TypeError)
+      }
+    )
+
+    test('Should reject a non-string audit field value', () => {
+      expect(() =>
+        assertSectionChanges(
+          { ...validChanges, updatedAt: 12345 },
+          allowedSectionFields
+        )
+      ).toThrow(TypeError)
+    })
+
+    test('Should reject changes with no section field at all', () => {
+      const { trip: _omit, ...withoutSection } = validChanges
+      expect(() =>
+        assertSectionChanges(withoutSection, allowedSectionFields)
+      ).toThrow(TypeError)
+    })
+
+    test('Should reject changes with more than one section field', () => {
+      expect(() =>
+        assertSectionChanges(
+          { ...validChanges, pairFishing: { enabled: false } },
+          allowedSectionFields
+        )
+      ).toThrow(TypeError)
+    })
+
+    test('Should reject a section field that is not on the allow-list', () => {
+      expect(() =>
+        assertSectionChanges(
+          {
+            updatedAt: validChanges.updatedAt,
+            updatedBy: validChanges.updatedBy,
+            gears: []
+          },
+          allowedSectionFields
+        )
+      ).toThrow(TypeError)
+    })
+
+    test.each(['__proto__', 'constructor', 'prototype'])(
+      'Should reject a prototype-pollution-shaped section key "%s"',
+      (pollutingKey) => {
+        const changes = {
+          updatedAt: validChanges.updatedAt,
+          updatedBy: validChanges.updatedBy,
+          [pollutingKey]: { polluted: true }
+        }
+        expect(() =>
+          assertSectionChanges(changes, [...allowedSectionFields, pollutingKey])
+        ).toThrow(TypeError)
+      }
+    )
+
+    test('Should reject a non-object section value (scalar)', () => {
+      expect(() =>
+        assertSectionChanges(
+          {
+            updatedAt: validChanges.updatedAt,
+            updatedBy: validChanges.updatedBy,
+            trip: 'not-an-object'
+          },
+          allowedSectionFields
+        )
+      ).toThrow(TypeError)
+    })
+
+    test('Should reject a non-object section value (array)', () => {
+      expect(() =>
+        assertSectionChanges(
+          {
+            updatedAt: validChanges.updatedAt,
+            updatedBy: validChanges.updatedBy,
+            trip: []
+          },
+          allowedSectionFields
+        )
       ).toThrow(TypeError)
     })
   })

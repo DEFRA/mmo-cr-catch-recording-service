@@ -9,11 +9,17 @@ function issue(code, pathSegments, message) {
   return { code, path: formatPath(pathSegments), message }
 }
 
+function isNonEmptyString(value) {
+  return typeof value === 'string' && value.trim().length > 0
+}
+
 /**
- * Implements the one approved pair-fishing conditional rule: when `enabled` is `false`, the dependent
- * `pairVessel`/`pairSkipperName` fields must be `null` or absent. The reverse direction ("`enabled` is
- * `true` requires certain fields") is not implemented — the populated pair-vessel shape remains
- * unresolved (Step 05), so there is nothing approved to validate against yet.
+ * Implements the two approved pair-fishing conditional rules (Step 21 resolves the previously-deferred
+ * `enabled: true` direction — `pairVessel`/`pairSkipperName` are plain display strings, not a nested
+ * reference-selection shape, confirmed directly from `normalization/sections/pair-fishing.js`):
+ *
+ * - `enabled: false` → the dependent `pairVessel`/`pairSkipperName` fields must be `null` or absent.
+ * - `enabled: true` → both `pairVessel` and `pairSkipperName` are required, non-empty strings.
  *
  * @param {unknown} pairFishing
  * @returns {{ valid: boolean, issues: ReadonlyArray<object> }}
@@ -23,10 +29,18 @@ export function validatePairFishing(pairFishing) {
     return createValidResult()
   }
 
-  if (pairFishing.enabled !== false) {
-    return createValidResult()
+  if (pairFishing.enabled === false) {
+    return validateDisabled(pairFishing)
   }
 
+  if (pairFishing.enabled === true) {
+    return validateEnabled(pairFishing)
+  }
+
+  return createValidResult()
+}
+
+function validateDisabled(pairFishing) {
   const issues = []
 
   for (const field of ['pairVessel', 'pairSkipperName']) {
@@ -37,6 +51,24 @@ export function validatePairFishing(pairFishing) {
           VALIDATION_CODES.CONDITIONAL_FIELD_INCONSISTENT,
           ['pairFishing', field],
           'Must be null or absent when pair fishing is disabled'
+        )
+      )
+    }
+  }
+
+  return issues.length === 0 ? createValidResult() : createInvalidResult(issues)
+}
+
+function validateEnabled(pairFishing) {
+  const issues = []
+
+  for (const field of ['pairVessel', 'pairSkipperName']) {
+    if (!isNonEmptyString(pairFishing[field])) {
+      issues.push(
+        issue(
+          VALIDATION_CODES.REQUIRED,
+          ['pairFishing', field],
+          'Required when pair fishing is enabled'
         )
       )
     }

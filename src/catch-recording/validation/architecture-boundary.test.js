@@ -7,7 +7,8 @@ const FRAMEWORK_NEUTRAL_FILES = [
   'catch-record.js',
   'sections/gears.js',
   'sections/pair-fishing.js',
-  'sections/landing.js'
+  'sections/landing.js',
+  'sections/trip.js'
 ]
 
 describe('#architecture-boundary (validation)', () => {

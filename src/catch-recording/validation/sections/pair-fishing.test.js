@@ -48,17 +48,50 @@ describe('#validatePairFishing', () => {
     })
   })
 
-  test('Should not validate the enabled-true direction (shape unresolved)', () => {
-    expect(validatePairFishing({ enabled: true })).toEqual({
-      valid: true,
-      issues: []
+  test('Should require pairVessel and pairSkipperName when enabled is true (Step 21 resolution)', () => {
+    expect(validatePairFishing({ enabled: true })).toMatchObject({
+      valid: false,
+      issues: [
+        {
+          code: 'REQUIRED',
+          path: 'pairFishing.pairVessel',
+          message: 'Required when pair fishing is enabled'
+        },
+        {
+          code: 'REQUIRED',
+          path: 'pairFishing.pairSkipperName',
+          message: 'Required when pair fishing is enabled'
+        }
+      ]
     })
+
     expect(
       validatePairFishing({ enabled: true, pairSkipperName: 'Jane Doe' })
-    ).toEqual({
-      valid: true,
-      issues: []
+    ).toMatchObject({
+      valid: false,
+      issues: [
+        {
+          code: 'REQUIRED',
+          path: 'pairFishing.pairVessel'
+        }
+      ]
     })
+
+    expect(
+      validatePairFishing({
+        enabled: true,
+        pairVessel: 'Other Vessel',
+        pairSkipperName: 'Jane Doe'
+      })
+    ).toEqual({ valid: true, issues: [] })
+
+    expect(
+      validatePairFishing({
+        enabled: true,
+        pairVessel: '  ',
+        pairSkipperName: ''
+      })
+    ).toMatchObject({ valid: false })
   })
 
   test('Should accept an absent or malformed pairFishing value', () => {

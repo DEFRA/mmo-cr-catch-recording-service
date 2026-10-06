@@ -1,4 +1,7 @@
-import { createGetVesselById } from './vessels-client.js'
+import {
+  createGetVesselById,
+  createListAccessibleVesselIds
+} from './vessels-client.js'
 import { isApplicationError } from '#/common/helpers/errors/application-error.js'
 
 function validVesselBody(overrides = {}) {
@@ -132,5 +135,74 @@ describe('#createGetVesselById', () => {
     const getVesselById = createGetVesselById({ httpClient })
 
     await expect(getVesselById('vessel-1')).resolves.toBeDefined()
+  })
+})
+
+describe('#createListAccessibleVesselIds', () => {
+  test('Should return the IDs from a valid collection response', async () => {
+    const httpClient = fakeHttpClient({
+      status: 200,
+      body: [{ id: 'vessel-1' }, { id: 'vessel-2' }]
+    })
+    const listAccessibleVesselIds = createListAccessibleVesselIds({
+      httpClient
+    })
+
+    await expect(listAccessibleVesselIds()).resolves.toEqual([
+      'vessel-1',
+      'vessel-2'
+    ])
+  })
+
+  test('Should request the vessel collection endpoint', async () => {
+    const httpClient = fakeHttpClient({ status: 200, body: [] })
+    const listAccessibleVesselIds = createListAccessibleVesselIds({
+      httpClient
+    })
+
+    await listAccessibleVesselIds({ correlationId: 'trace-1' })
+
+    expect(httpClient.get).toHaveBeenCalledWith({
+      path: '/api/v1/reference-data/vessels',
+      correlationId: 'trace-1'
+    })
+  })
+
+  test('Should return an empty array when the caller has no accessible vessels', async () => {
+    const httpClient = fakeHttpClient({ status: 200, body: [] })
+    const listAccessibleVesselIds = createListAccessibleVesselIds({
+      httpClient
+    })
+
+    await expect(listAccessibleVesselIds()).resolves.toEqual([])
+  })
+
+  test('Should raise UPSTREAM_INVALID_RESPONSE for an unexpected status', async () => {
+    const httpClient = fakeHttpClient({ status: 500, body: null })
+    const listAccessibleVesselIds = createListAccessibleVesselIds({
+      httpClient
+    })
+
+    await expect(listAccessibleVesselIds()).rejects.toSatisfy(
+      isApplicationError
+    )
+  })
+
+  test.each([
+    ['non-array body', { not: 'an array' }],
+    ['entry missing id', [{ name: 'no id' }]],
+    ['entry with non-string id', [{ id: 42 }]]
+  ])('Should raise UPSTREAM_INVALID_RESPONSE for %s', async (_label, body) => {
+    const httpClient = fakeHttpClient({ status: 200, body })
+    const listAccessibleVesselIds = createListAccessibleVesselIds({
+      httpClient
+    })
+
+    try {
+      await listAccessibleVesselIds()
+      throw new Error('expected listAccessibleVesselIds to reject')
+    } catch (error) {
+      expect(error.category).toBe('UPSTREAM_INVALID_RESPONSE')
+    }
   })
 })

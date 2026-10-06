@@ -79,12 +79,17 @@ describe('#validateCatchRecord', () => {
     expect(first).toEqual(second)
   })
 
-  test('Should not falsely report a deferred business rule as implemented', () => {
-    // pairFishing.enabled = true with no populated fields: the "enabled requires fields" direction
-    // is explicitly deferred (unresolved shape) and must not be flagged.
+  test('Should enforce the Step 21-resolved pair-fishing "enabled requires fields" rule', () => {
+    // pairFishing.enabled = true with no populated fields: Step 21 resolved this previously-deferred
+    // direction - pairVessel/pairSkipperName are now required.
     const result = validateCatchRecord({ pairFishing: { enabled: true } })
 
-    expect(result).toEqual({ valid: true, issues: [] })
+    expect(result.valid).toBe(false)
+    expect(result.issues).toContainEqual({
+      code: 'REQUIRED',
+      path: 'pairFishing.pairVessel',
+      message: 'Required when pair fishing is enabled'
+    })
   })
 
   test('Should reuse section validators rather than duplicating their rules', () => {

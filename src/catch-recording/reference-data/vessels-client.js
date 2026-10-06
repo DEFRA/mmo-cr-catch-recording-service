@@ -137,3 +137,43 @@ export function createGetVesselById({ httpClient }) {
     return vessel
   }
 }
+
+/**
+ * Resolves the trusted, caller-scoped set of accessible vessel IDs by calling the Reference Data
+ * Service's own vessel collection endpoint (`docs/configuration-decisions.md`, "Resource authorisation
+ * (Step 14)" — "Vessel-permission source"). The response is assumed already scoped to vessels the caller
+ * may access; this function performs no authorisation decision itself, it only resolves the trusted fact
+ * `decideVesselAccess` (Step 14) later evaluates against.
+ *
+ * @param {{ httpClient: { get: Function } }} deps
+ * @returns {(options?: { correlationId?: string }) => Promise<string[]>}
+ */
+export function createListAccessibleVesselIds({ httpClient }) {
+  return async function listAccessibleVesselIds({ correlationId } = {}) {
+    const { status, body } = await httpClient.get({
+      path: BASE_PATH,
+      correlationId
+    })
+
+    if (!isSuccessStatus(status)) {
+      throw upstreamInvalidResponseError(
+        new Error(`Unexpected vessel list response status ${status}`)
+      )
+    }
+
+    if (!Array.isArray(body)) {
+      throw upstreamInvalidResponseError(
+        new Error('Malformed vessel list response body')
+      )
+    }
+
+    return body.map((item) => {
+      if (!isPlainObject(item) || !isNonEmptyString(item.id)) {
+        throw upstreamInvalidResponseError(
+          new Error('Malformed vessel list response body')
+        )
+      }
+      return item.id
+    })
+  }
+}

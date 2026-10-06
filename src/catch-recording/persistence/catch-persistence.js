@@ -10,18 +10,21 @@ import {
 import {
   assertPlainString,
   assertSafeListLimit,
-  assertAllowedChanges
+  assertAllowedChanges,
+  assertSectionChanges
 } from './persistence-guards.js'
 import {
   translateInsertError,
   malformedDocumentError,
   unexpectedPersistenceError,
-  versionConflictError
+  versionConflictError,
+  ineligibleAbandonmentError
 } from './catch-persistence-errors.js'
 import {
   MIN_EXPECTED_VERSION,
   validateExpectedVersion
 } from './expected-version.js'
+import { PERSISTED_STATUSES } from '../domain/lifecycle-status.js'
 
 /**
  * `CatchPersistence`: the sole Catch Recording owner of Catch Record MongoDB access.
@@ -32,10 +35,13 @@ import {
  * document content ever reaches a caller. See `docs/catch-recording-persistence.md` for the full
  * contract.
  *
- * Does not implement: routes, history, idempotency, authentication/authorisation, submission, section
- * updates, or any later-phase behaviour (Steps 10, 12, and beyond). Step 11 adds atomic optimistic
- * concurrency (expected-version matching and version increment) to the one existing-record mutation
- * primitive below; it does not add a second, competing update path.
+ * Does not implement: routes, history, idempotency, authentication/authorisation, submission, or any
+ * later-phase behaviour beyond Step 19. Step 11 adds atomic optimistic concurrency (expected-version
+ * matching and version increment) to the audit-metadata mutation primitive; it does not add a second,
+ * competing update path. Step 19 adds one further atomic primitive, `deleteEligibleDraftForOwner` — a
+ * physical delete (the Catch Record's own append-only history lives in a separate collection and is
+ * unaffected), not a status change — because the canonical contract has no "abandoned"/"inactive" field
+ * to set instead (`PERSISTED_STATUSES` remains exactly `DRAFT`/`SUBMITTED`/`COMPLETE`).
  */
 
 /** Persistence-owned technical safety ceiling for `listCatchRecordsByOwner` (see Step 09 plan §5). Not
@@ -225,6 +231,61 @@ async function classifyMutationMiss(collection, { id, ownerUserId }) {
 }
 
 /**
+ * Step 20's one atomic generic section-update primitive. Extends `applyAuditMetadataUpdate`'s exact
+ * atomic predicate/update shape (same "the predicate, not an application read, controls the write"
+ * guarantee, same owner-scoped/version-less diagnostic classification on no match) rather than adding a
+ * competing update path - the only difference is `changes` may additionally carry exactly one
+ * allow-listed section field whose own value is a plain object, guarded by `assertSectionChanges`
+ * instead of `assertAllowedChanges`.
+ *
+ * `allowedFields` is always supplied by the calling later business operation (mirrors Step 12's
+ * `allowedFields` pattern) - this module hard-codes no section-name catalogue itself, so a future phase
+ * extending the approved section allow-list never requires a change here.
+ *
+ * @param {import('mongodb').Db} db
+ * @param {{
+ *   id: string,
+ *   ownerUserId: string,
+ *   expectedVersion: number,
+ *   changes: { updatedAt: string, updatedBy: string, [section: string]: unknown },
+ *   allowedFields: ReadonlyArray<string>
+ * }} params
+ * @returns {Promise<import('../domain/canonical-catch-record.js').CatchRecord|null>} The updated
+ *   canonical record (with `version` incremented by exactly `1`), or `null` when the record does not
+ *   exist for this owner.
+ * @throws {import('#/common/helpers/errors/application-error.js').ApplicationError} `VERSION_CONFLICT`
+ *   when the record exists for this owner but `expectedVersion` no longer matches the stored version.
+ */
+export async function applySectionUpdate(
+  db,
+  { id, ownerUserId, expectedVersion, changes, allowedFields }
+) {
+  assertPlainString(id, 'id')
+  assertPlainString(ownerUserId, 'ownerUserId')
+  const matchedVersion = validateExpectedVersion(expectedVersion)
+  assertSectionChanges(changes, allowedFields)
+
+  const collection = getCatchRecordCollection(db)
+
+  let document
+  try {
+    document = await collection.findOneAndUpdate(
+      { _id: id, ownerUserId, version: matchedVersion },
+      { $set: { ...changes }, $inc: { version: 1 } },
+      { returnDocument: 'after' }
+    )
+  } catch (error) {
+    throw unexpectedPersistenceError(error)
+  }
+
+  if (document) {
+    return mapStoredDocument(document)
+  }
+
+  return classifyMutationMiss(collection, { id, ownerUserId })
+}
+
+/**
  * Owner-scoped, bounded, deterministic list primitive. Filters by `ownerUserId` only (no status/vessel
  * filter, cursor, or offset — none is approved yet), sorted newest-first with a stable `_id`
  * tie-breaker, bounded by a caller-supplied `limit` which must not exceed `MAX_LIST_LIMIT`.
@@ -251,6 +312,100 @@ export async function listCatchRecordsByOwner(db, { ownerUserId, limit }) {
   }
 
   return documents.map((document) => mapStoredDocument(document))
+}
+
+/**
+ * Step 19's one atomic eligible-draft-abandonment primitive. Physically deletes the Catch Record
+ * document — the Catch Record's append-only history (a separate collection, never embedded) is
+ * unaffected and remains a true audit trail of the abandonment.
+ *
+ * The predicate embeds the full eligibility check atomically (owner, never-submitted `DRAFT`, and the
+ * caller's expected version) in one call — mirrors `applyAuditMetadataUpdate`'s "predicate, not an
+ * application read, controls the write" pattern, extended to a delete.
+ *
+ * On no match, a single owner-scoped, version-less diagnostic read distinguishes three safe, idempotent
+ * outcomes, never disclosing more to the wrong owner than an identical "nothing happened" result:
+ * - The record does not exist for this owner at all (covers a genuinely missing record, a cross-owner
+ *   attempt, and an already-abandoned record — all indistinguishable, all return `null`). Deliberately
+ *   idempotent: a repeated `DELETE` on an already-abandoned draft is treated the same as the first
+ *   successful call, never as an error.
+ * - The record exists for this owner but is not an eligible never-submitted `DRAFT` (already submitted,
+ *   completed, or an amended draft) — throws `INVALID_LIFECYCLE_TRANSITION`.
+ * - The record exists for this owner, is an eligible `DRAFT`, but its stored `version` no longer matches
+ *   `expectedVersion` — throws `VERSION_CONFLICT`.
+ *
+ * @param {import('mongodb').Db} db
+ * @param {{ id: string, ownerUserId: string, expectedVersion: number }} params
+ * @returns {Promise<import('../domain/canonical-catch-record.js').CatchRecord|null>} The now-deleted
+ *   canonical record (so a caller can append a safe history event referencing it), or `null` when
+ *   nothing matched (already abandoned, never existed, or a cross-owner attempt).
+ * @throws {import('#/common/helpers/errors/application-error.js').ApplicationError}
+ *   `INVALID_LIFECYCLE_TRANSITION` or `VERSION_CONFLICT`.
+ */
+export async function deleteEligibleDraftForOwner(
+  db,
+  { id, ownerUserId, expectedVersion }
+) {
+  assertPlainString(id, 'id')
+  assertPlainString(ownerUserId, 'ownerUserId')
+  const matchedVersion = validateExpectedVersion(expectedVersion)
+
+  const collection = getCatchRecordCollection(db)
+
+  let document
+  try {
+    document = await collection.findOneAndDelete({
+      _id: id,
+      ownerUserId,
+      status: PERSISTED_STATUSES.DRAFT,
+      numberOfSubmissions: 0,
+      submittedAt: null,
+      submittedBy: null,
+      version: matchedVersion
+    })
+  } catch (error) {
+    throw unexpectedPersistenceError(error)
+  }
+
+  if (document) {
+    return mapStoredDocument(document)
+  }
+
+  return classifyAbandonmentMiss(collection, { id, ownerUserId })
+}
+
+/**
+ * Classifies why the atomic eligible-draft delete above found no match. Runs only after the delete has
+ * already failed to match — this diagnostic read never gates, retries, or otherwise controls the write.
+ *
+ * @param {import('mongodb').Collection} collection
+ * @param {{ id: string, ownerUserId: string }} params
+ * @returns {Promise<null>}
+ * @throws {import('#/common/helpers/errors/application-error.js').ApplicationError}
+ */
+async function classifyAbandonmentMiss(collection, { id, ownerUserId }) {
+  let existing
+  try {
+    existing = await collection.findOne({ _id: id, ownerUserId })
+  } catch (error) {
+    throw unexpectedPersistenceError(error)
+  }
+
+  if (existing === null) {
+    return null
+  }
+
+  const isEligibleDraft =
+    existing.status === PERSISTED_STATUSES.DRAFT &&
+    existing.numberOfSubmissions === 0 &&
+    existing.submittedAt == null &&
+    existing.submittedBy == null
+
+  if (!isEligibleDraft) {
+    throw ineligibleAbandonmentError()
+  }
+
+  throw versionConflictError()
 }
 
 export { ensureCatchRecordIndexes, CATCH_RECORD_COLLECTION }
