@@ -14,14 +14,15 @@ status interpretation, and strict response validation. It does **not** own activ
 snapshot mapping into Catch Records, vessel authorisation, or any persistence/business operation — those
 are Step 16 and later steps.
 
-## The five operations
+## The six operations
 
-`createReferenceDataClient(options)` returns exactly five explicit, read-only functions — no generic
+`createReferenceDataClient(options)` returns exactly six explicit, read-only functions — no generic
 `get(resourceType, id)` method exists:
 
 | Operation                    | Endpoint                                                                                |
 | ---------------------------- | --------------------------------------------------------------------------------------- |
 | `getVesselById(id)`          | `GET /api/v1/reference-data/vessels/{id}`                                               |
+| `listAccessibleVesselIds()`  | `GET /api/v1/reference-data/vessels` (collection, IDs only)                             |
 | `getPortById(id)`            | `GET /api/v1/reference-data/ports/{id}`                                                 |
 | `getSpeciesById(id)`         | `GET /api/v1/reference-data/species/{id}`                                               |
 | `getStatisticalAreaById(id)` | `GET /api/v1/reference-data/map/statistical-areas/{id}` (GeoJSON `Feature`)             |
@@ -31,6 +32,13 @@ are Step 16 and later steps.
 `applicableCharacteristics[].characteristicId` only resolves to a name/unit via the collection envelope's
 top-level `characteristics[]` catalog, which the item endpoint never returns. The client joins the two
 into one resolved, self-contained `characteristics[]` array on its result.
+
+`listAccessibleVesselIds()` similarly receives a collection-envelope object, not a bare array —
+`{ dataset, collectionId, schemaVersion, version, view, total, items: [...] }` — confirmed directly
+against the real Reference Data Service response. Only `items[].id` is read; every other envelope field
+and every other per-item field (`name`, `identifiers`, `status`, ...) is an unknown extra field, read but
+never copied into the returned `string[]` of IDs. A bare array body (the pre-confirmation assumption) is
+now explicitly rejected as `UPSTREAM_INVALID_RESPONSE`.
 
 ## Request construction
 

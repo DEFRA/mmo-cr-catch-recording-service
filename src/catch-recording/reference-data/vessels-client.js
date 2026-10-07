@@ -145,6 +145,12 @@ export function createGetVesselById({ httpClient }) {
  * may access; this function performs no authorisation decision itself, it only resolves the trusted fact
  * `decideVesselAccess` (Step 14) later evaluates against.
  *
+ * The confirmed response is a collection-envelope object (`{ dataset, collectionId, schemaVersion,
+ * version, view, total, items: [...] }`), matching `getGearById`'s own collection-envelope precedent —
+ * never a bare array. Only `items[].id` is read; every other envelope field (`dataset`, `collectionId`,
+ * `schemaVersion`, `version`, `view`, `total`) and every other per-item field are unknown extra fields,
+ * read but never copied into the returned result.
+ *
  * @param {{ httpClient: { get: Function } }} deps
  * @returns {(options?: { correlationId?: string }) => Promise<string[]>}
  */
@@ -161,13 +167,13 @@ export function createListAccessibleVesselIds({ httpClient }) {
       )
     }
 
-    if (!Array.isArray(body)) {
+    if (!isPlainObject(body) || !Array.isArray(body.items)) {
       throw upstreamInvalidResponseError(
         new Error('Malformed vessel list response body')
       )
     }
 
-    return body.map((item) => {
+    return body.items.map((item) => {
       if (!isPlainObject(item) || !isNonEmptyString(item.id)) {
         throw upstreamInvalidResponseError(
           new Error('Malformed vessel list response body')

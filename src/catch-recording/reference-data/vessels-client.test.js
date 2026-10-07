@@ -139,10 +139,15 @@ describe('#createGetVesselById', () => {
 })
 
 describe('#createListAccessibleVesselIds', () => {
-  test('Should return the IDs from a valid collection response', async () => {
+  test('Should return the IDs from a valid collection-envelope response', async () => {
     const httpClient = fakeHttpClient({
       status: 200,
-      body: [{ id: 'vessel-1' }, { id: 'vessel-2' }]
+      body: {
+        dataset: 'vessels',
+        schemaVersion: '1.0',
+        total: 2,
+        items: [{ id: 'vessel-1' }, { id: 'vessel-2' }]
+      }
     })
     const listAccessibleVesselIds = createListAccessibleVesselIds({
       httpClient
@@ -155,7 +160,7 @@ describe('#createListAccessibleVesselIds', () => {
   })
 
   test('Should request the vessel collection endpoint', async () => {
-    const httpClient = fakeHttpClient({ status: 200, body: [] })
+    const httpClient = fakeHttpClient({ status: 200, body: { items: [] } })
     const listAccessibleVesselIds = createListAccessibleVesselIds({
       httpClient
     })
@@ -169,7 +174,7 @@ describe('#createListAccessibleVesselIds', () => {
   })
 
   test('Should return an empty array when the caller has no accessible vessels', async () => {
-    const httpClient = fakeHttpClient({ status: 200, body: [] })
+    const httpClient = fakeHttpClient({ status: 200, body: { items: [] } })
     const listAccessibleVesselIds = createListAccessibleVesselIds({
       httpClient
     })
@@ -189,9 +194,12 @@ describe('#createListAccessibleVesselIds', () => {
   })
 
   test.each([
-    ['non-array body', { not: 'an array' }],
-    ['entry missing id', [{ name: 'no id' }]],
-    ['entry with non-string id', [{ id: 42 }]]
+    ['a bare array body (pre-envelope shape, no longer accepted)', []],
+    ['non-object body', 'not an object'],
+    ['an object with no items array', { dataset: 'vessels' }],
+    ['items not an array', { items: 'not an array' }],
+    ['an item missing id', { items: [{ name: 'no id' }] }],
+    ['an item with a non-string id', { items: [{ id: 42 }] }]
   ])('Should raise UPSTREAM_INVALID_RESPONSE for %s', async (_label, body) => {
     const httpClient = fakeHttpClient({ status: 200, body })
     const listAccessibleVesselIds = createListAccessibleVesselIds({
