@@ -36,7 +36,11 @@ const PERSISTENCE_SOURCE_FILES = [
   'idempotency-fingerprint.js',
   'catch-idempotency-collection.js',
   'catch-idempotency-errors.js',
-  'catch-idempotency-persistence.js'
+  'catch-idempotency-persistence.js',
+  'vessel-profile-collection.js',
+  'vessel-profile-mapper.js',
+  'vessel-profile-errors.js',
+  'vessel-profile-persistence.js'
 ]
 
 /** Step 09/11 Catch Record files that Step 12's idempotency adapter must never import — structural proof
@@ -154,6 +158,23 @@ describe('#architecture-boundary (persistence)', () => {
         )
       )
     }
+  })
+
+  test('vessel-profile-persistence.js exposes a closed, known set of functions', async () => {
+    const vesselProfilePersistence =
+      await import('./vessel-profile-persistence.js')
+    const exportedFunctionNames = Object.keys(vesselProfilePersistence).filter(
+      (name) => typeof vesselProfilePersistence[name] === 'function'
+    )
+
+    expect(exportedFunctionNames.sort()).toEqual([
+      'addFavouriteId',
+      'addSkipper',
+      'ensureVesselProfileIndexes',
+      'findVesselProfile',
+      'removeFavouriteId',
+      'removeSkipper'
+    ])
   })
 
   test('catch-persistence.js exposes a closed, known set of functions — no second, competing update primitive', async () => {
