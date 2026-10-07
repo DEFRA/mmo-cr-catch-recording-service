@@ -20,7 +20,8 @@ import {
   unexpectedPersistenceError,
   versionConflictError,
   ineligibleAbandonmentError,
-  ineligibleReplacementError
+  ineligibleReplacementError,
+  ineligibleSectionUpdateError
 } from './catch-persistence-errors.js'
 import {
   MIN_EXPECTED_VERSION,
@@ -141,6 +142,32 @@ export async function findCatchRecordByReference(db, { catchRecordReference }) {
 }
 
 /**
+ * Trusted-internal, exact-match retrieval by canonical internal ID alone — **not** owner-scoped.
+ * Reserved exclusively for Step 36's restricted completion, the one approved operation whose
+ * authorisation is purely permission-gated rather than ownership-gated (`completion-policy.js`'s
+ * `decideCompletionAccess` has no `ownerUserId` parameter by design). Must never be exposed directly to
+ * an HTTP route or used by any ownership-scoped operation.
+ *
+ * @param {import('mongodb').Db} db
+ * @param {{ id: string }} params
+ * @returns {Promise<import('../domain/canonical-catch-record.js').CatchRecord|null>}
+ */
+export async function findCatchRecordById(db, { id }) {
+  assertPlainString(id, 'id')
+
+  const collection = getCatchRecordCollection(db)
+
+  let document
+  try {
+    document = await collection.findOne({ _id: id })
+  } catch (error) {
+    throw unexpectedPersistenceError(error)
+  }
+
+  return document ? mapStoredDocument(document) : null
+}
+
+/**
  * The one existing-record atomic compare-and-update primitive `CatchPersistence` provides. Matches
  * canonical identity (`_id`), trusted owner identity (`ownerUserId`), and the caller's expected current
  * `version` in a single MongoDB predicate — the database predicate, not an application read, controls
@@ -236,10 +263,12 @@ async function classifyMutationMiss(collection, { id, ownerUserId }) {
 }
 
 /**
- * Step 20's one atomic generic section-update primitive. Extends `applyAuditMetadataUpdate`'s exact
- * atomic predicate/update shape (same "the predicate, not an application read, controls the write"
- * guarantee, same owner-scoped/version-less diagnostic classification on no match) rather than adding a
- * competing update path - the only difference is `changes` may additionally carry exactly one
+ * Step 20's one atomic generic section-update primitive, extended by Step 38 with a `status: DRAFT`
+ * predicate condition - mirroring `applyCompleteReplacement`'s established "lifecycle eligibility
+ * embedded in the same atomic predicate, not an application read" pattern. A section save (first-draft
+ * or amendment) is only ever valid against a `DRAFT` record (never-submitted or amended); a
+ * `SUBMITTED`/`COMPLETE` record must first return to `DRAFT` via Step 37's edit-start. The only
+ * difference from `applyAuditMetadataUpdate`'s shape is `changes` may additionally carry exactly one
  * allow-listed section field whose own value is a plain object, guarded by `assertSectionChanges`
  * instead of `assertAllowedChanges`.
  *
@@ -258,8 +287,8 @@ async function classifyMutationMiss(collection, { id, ownerUserId }) {
  * @returns {Promise<import('../domain/canonical-catch-record.js').CatchRecord|null>} The updated
  *   canonical record (with `version` incremented by exactly `1`), or `null` when the record does not
  *   exist for this owner.
- * @throws {import('#/common/helpers/errors/application-error.js').ApplicationError} `VERSION_CONFLICT`
- *   when the record exists for this owner but `expectedVersion` no longer matches the stored version.
+ * @throws {import('#/common/helpers/errors/application-error.js').ApplicationError}
+ *   `INVALID_LIFECYCLE_TRANSITION` or `VERSION_CONFLICT`.
  */
 export async function applySectionUpdate(
   db,
@@ -275,7 +304,12 @@ export async function applySectionUpdate(
   let document
   try {
     document = await collection.findOneAndUpdate(
-      { _id: id, ownerUserId, version: matchedVersion },
+      {
+        _id: id,
+        ownerUserId,
+        status: PERSISTED_STATUSES.DRAFT,
+        version: matchedVersion
+      },
       { $set: { ...changes }, $inc: { version: 1 } },
       { returnDocument: 'after' }
     )
@@ -287,7 +321,35 @@ export async function applySectionUpdate(
     return mapStoredDocument(document)
   }
 
-  return classifyMutationMiss(collection, { id, ownerUserId })
+  return classifySectionUpdateMiss(collection, { id, ownerUserId })
+}
+
+/**
+ * Classifies why the atomic section-update above found no match. Runs only after the write has already
+ * failed to match - this diagnostic read never gates, retries, or otherwise controls the write.
+ *
+ * @param {import('mongodb').Collection} collection
+ * @param {{ id: string, ownerUserId: string }} params
+ * @returns {Promise<null>}
+ * @throws {import('#/common/helpers/errors/application-error.js').ApplicationError}
+ */
+async function classifySectionUpdateMiss(collection, { id, ownerUserId }) {
+  let existing
+  try {
+    existing = await collection.findOne({ _id: id, ownerUserId })
+  } catch (error) {
+    throw unexpectedPersistenceError(error)
+  }
+
+  if (existing === null) {
+    return null
+  }
+
+  if (existing.status !== PERSISTED_STATUSES.DRAFT) {
+    throw ineligibleSectionUpdateError()
+  }
+
+  throw versionConflictError()
 }
 
 /**
@@ -536,6 +598,10 @@ async function classifyReplacementMiss(collection, { id, ownerUserId }) {
 
   throw versionConflictError()
 }
-
 export { ensureCatchRecordIndexes, CATCH_RECORD_COLLECTION }
 export { MIN_EXPECTED_VERSION, validateExpectedVersion }
+export {
+  applySubmission,
+  applyCompletion,
+  applyEditStart
+} from './catch-persistence-lifecycle.js'

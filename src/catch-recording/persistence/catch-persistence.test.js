@@ -1,15 +1,23 @@
 import {
   applyAuditMetadataUpdate,
   applyCompleteReplacement,
+  applyCompletion,
+  applyEditStart,
   applySectionUpdate,
+  applySubmission,
   createCatchRecord,
   deleteEligibleDraftForOwner,
+  findCatchRecordById,
   findCatchRecordByIdForOwner,
   findCatchRecordByReference,
   listCatchRecordsByOwner,
   MAX_LIST_LIMIT
 } from './catch-persistence.js'
-import { newDraftExample } from '../domain/__fixtures__/canonical-catch-record.fixtures.js'
+import {
+  newDraftExample,
+  submittedExample,
+  completeExample
+} from '../domain/__fixtures__/canonical-catch-record.fixtures.js'
 import { toPersistenceDocument } from './catch-record-mapper.js'
 
 function buildFakeCollection(overrides = {}) {
@@ -670,6 +678,7 @@ describe('#catch-persistence', () => {
         {
           _id: newDraftExample.id,
           ownerUserId: newDraftExample.ownerUserId,
+          status: 'DRAFT',
           version: expectedVersion
         },
         { $set: changes, $inc: { version: 1 } },
@@ -696,10 +705,33 @@ describe('#catch-persistence', () => {
       expect(result).toBeNull()
     })
 
-    test('Should throw a deterministic VERSION_CONFLICT when the owner-scoped record exists but the version was stale', async () => {
+    test('Should throw CATCH_RECORD_SECTION_UPDATE_INELIGIBLE when the record exists but is not DRAFT', async () => {
       const collection = buildFakeCollection({
         findOneAndUpdate: vi.fn().mockResolvedValue(null),
-        findOne: vi.fn().mockResolvedValue({ _id: newDraftExample.id })
+        findOne: vi.fn().mockResolvedValue({ status: 'SUBMITTED' })
+      })
+      const db = buildFakeDb(collection)
+
+      await expect(
+        applySectionUpdate(db, {
+          id: newDraftExample.id,
+          ownerUserId: newDraftExample.ownerUserId,
+          expectedVersion,
+          changes,
+          allowedFields
+        })
+      ).rejects.toMatchObject({
+        category: 'INVALID_LIFECYCLE_TRANSITION',
+        code: 'CATCH_RECORD_SECTION_UPDATE_INELIGIBLE'
+      })
+    })
+
+    test('Should throw a deterministic VERSION_CONFLICT when the owner-scoped record exists, is DRAFT, but the version was stale', async () => {
+      const collection = buildFakeCollection({
+        findOneAndUpdate: vi.fn().mockResolvedValue(null),
+        findOne: vi
+          .fn()
+          .mockResolvedValue({ _id: newDraftExample.id, status: 'DRAFT' })
       })
       const db = buildFakeDb(collection)
 
@@ -1121,6 +1153,438 @@ describe('#catch-persistence', () => {
           changes: replacementChanges()
         })
       ).rejects.toMatchObject({ category: 'UNEXPECTED_INTERNAL_FAILURE' })
+    })
+  })
+
+  describe('applySubmission', () => {
+    const expectedVersion = newDraftExample.version
+
+    function submissionParams(overrides = {}) {
+      return {
+        id: newDraftExample.id,
+        ownerUserId: newDraftExample.ownerUserId,
+        expectedVersion,
+        submissionNumber: 1,
+        artifacts: [
+          { submissionNumber: 1, type: 'JSON_SNAPSHOT' },
+          { submissionNumber: 1, type: 'PDF_RECEIPT' }
+        ],
+        submittedAt: '2026-10-07T09:00:00Z',
+        submittedBy: newDraftExample.ownerUserId,
+        updatedAt: '2026-10-07T09:00:00Z',
+        updatedBy: newDraftExample.ownerUserId,
+        ...overrides
+      }
+    }
+
+    test('Should atomically match id/owner/DRAFT/version, committing SUBMITTED and incrementing version once', async () => {
+      const params = submissionParams()
+      const updatedDocument = {
+        ...toPersistenceDocument(newDraftExample),
+        status: 'SUBMITTED',
+        numberOfSubmissions: params.submissionNumber,
+        hasUnsubmittedChanges: false,
+        artifacts: params.artifacts,
+        submittedAt: params.submittedAt,
+        submittedBy: params.submittedBy,
+        updatedAt: params.updatedAt,
+        updatedBy: params.updatedBy,
+        version: expectedVersion + 1
+      }
+      const collection = buildFakeCollection({
+        findOneAndUpdate: vi.fn().mockResolvedValue(updatedDocument)
+      })
+      const db = buildFakeDb(collection)
+
+      const result = await applySubmission(db, params)
+
+      expect(collection.findOneAndUpdate).toHaveBeenCalledExactlyOnceWith(
+        {
+          _id: newDraftExample.id,
+          ownerUserId: newDraftExample.ownerUserId,
+          status: 'DRAFT',
+          version: expectedVersion
+        },
+        {
+          $set: {
+            status: 'SUBMITTED',
+            numberOfSubmissions: params.submissionNumber,
+            hasUnsubmittedChanges: false,
+            artifacts: params.artifacts,
+            submittedAt: params.submittedAt,
+            submittedBy: params.submittedBy,
+            updatedAt: params.updatedAt,
+            updatedBy: params.updatedBy
+          },
+          $inc: { version: 1 }
+        },
+        { returnDocument: 'after' }
+      )
+      expect(result.status).toBe('SUBMITTED')
+      expect(result.version).toBe(expectedVersion + 1)
+    })
+
+    test('Should return null when the record does not exist for this owner', async () => {
+      const collection = buildFakeCollection({
+        findOneAndUpdate: vi.fn().mockResolvedValue(null),
+        findOne: vi.fn().mockResolvedValue(null)
+      })
+      const db = buildFakeDb(collection)
+
+      const result = await applySubmission(db, submissionParams())
+
+      expect(result).toBeNull()
+    })
+
+    test('Should throw CATCH_RECORD_SUBMISSION_INELIGIBLE when the record exists but is not DRAFT', async () => {
+      const collection = buildFakeCollection({
+        findOneAndUpdate: vi.fn().mockResolvedValue(null),
+        findOne: vi.fn().mockResolvedValue({ status: 'SUBMITTED' })
+      })
+      const db = buildFakeDb(collection)
+
+      await expect(
+        applySubmission(db, submissionParams())
+      ).rejects.toMatchObject({
+        category: 'INVALID_LIFECYCLE_TRANSITION',
+        code: 'CATCH_RECORD_SUBMISSION_INELIGIBLE'
+      })
+    })
+
+    test('Should throw VERSION_CONFLICT when the record is DRAFT but the version no longer matches', async () => {
+      const collection = buildFakeCollection({
+        findOneAndUpdate: vi.fn().mockResolvedValue(null),
+        findOne: vi.fn().mockResolvedValue({ status: 'DRAFT' })
+      })
+      const db = buildFakeDb(collection)
+
+      await expect(
+        applySubmission(db, submissionParams())
+      ).rejects.toMatchObject({ category: 'VERSION_CONFLICT' })
+    })
+
+    test('Should reject a non-array artifacts value before calling the driver', async () => {
+      const collection = buildFakeCollection()
+      const db = buildFakeDb(collection)
+
+      await expect(
+        applySubmission(db, submissionParams({ artifacts: 'not-an-array' }))
+      ).rejects.toThrow(TypeError)
+      expect(collection.findOneAndUpdate).not.toHaveBeenCalled()
+    })
+
+    test('Should reject a malformed artifact entry before calling the driver', async () => {
+      const collection = buildFakeCollection()
+      const db = buildFakeDb(collection)
+
+      await expect(
+        applySubmission(
+          db,
+          submissionParams({ artifacts: [{ type: 'JSON_SNAPSHOT' }] })
+        )
+      ).rejects.toThrow(TypeError)
+      expect(collection.findOneAndUpdate).not.toHaveBeenCalled()
+    })
+
+    test('Should reject a zero or negative submission number before calling the driver', async () => {
+      const collection = buildFakeCollection()
+      const db = buildFakeDb(collection)
+
+      await expect(
+        applySubmission(db, submissionParams({ submissionNumber: 0 }))
+      ).rejects.toThrow(TypeError)
+      expect(collection.findOneAndUpdate).not.toHaveBeenCalled()
+    })
+
+    test('Should translate an unexpected driver failure safely', async () => {
+      const collection = buildFakeCollection({
+        findOneAndUpdate: vi
+          .fn()
+          .mockRejectedValue(new Error('connection reset'))
+      })
+      const db = buildFakeDb(collection)
+
+      await expect(
+        applySubmission(db, submissionParams())
+      ).rejects.toMatchObject({ category: 'UNEXPECTED_INTERNAL_FAILURE' })
+    })
+  })
+
+  describe('findCatchRecordById', () => {
+    test('Should retrieve a record by id regardless of owner (not owner-scoped)', async () => {
+      const collection = buildFakeCollection({
+        findOne: vi
+          .fn()
+          .mockResolvedValue(toPersistenceDocument(submittedExample))
+      })
+      const db = buildFakeDb(collection)
+
+      const result = await findCatchRecordById(db, {
+        id: submittedExample.id
+      })
+
+      expect(collection.findOne).toHaveBeenCalledExactlyOnceWith({
+        _id: submittedExample.id
+      })
+      expect(result.id).toBe(submittedExample.id)
+    })
+
+    test('Should return null when no record exists with this id', async () => {
+      const collection = buildFakeCollection({
+        findOne: vi.fn().mockResolvedValue(null)
+      })
+      const db = buildFakeDb(collection)
+
+      expect(await findCatchRecordById(db, { id: 'missing' })).toBeNull()
+    })
+  })
+
+  describe('applyCompletion', () => {
+    const expectedVersion = submittedExample.version
+
+    function completionParams(overrides = {}) {
+      return {
+        id: submittedExample.id,
+        expectedVersion,
+        completedAt: '2026-10-07T09:00:00Z',
+        completedBy: submittedExample.ownerUserId,
+        ...overrides
+      }
+    }
+
+    test('Should atomically match id/SUBMITTED/version (no owner scoping), committing COMPLETE and incrementing version once', async () => {
+      const params = completionParams()
+      const updatedDocument = {
+        ...toPersistenceDocument(submittedExample),
+        status: 'COMPLETE',
+        completedAt: params.completedAt,
+        completedBy: params.completedBy,
+        version: expectedVersion + 1
+      }
+      const collection = buildFakeCollection({
+        findOneAndUpdate: vi.fn().mockResolvedValue(updatedDocument)
+      })
+      const db = buildFakeDb(collection)
+
+      const result = await applyCompletion(db, params)
+
+      expect(collection.findOneAndUpdate).toHaveBeenCalledExactlyOnceWith(
+        {
+          _id: submittedExample.id,
+          status: 'SUBMITTED',
+          version: expectedVersion
+        },
+        {
+          $set: {
+            status: 'COMPLETE',
+            completedAt: params.completedAt,
+            completedBy: params.completedBy,
+            updatedAt: params.completedAt,
+            updatedBy: params.completedBy
+          },
+          $inc: { version: 1 }
+        },
+        { returnDocument: 'after' }
+      )
+      expect(result.status).toBe('COMPLETE')
+      expect(result.version).toBe(expectedVersion + 1)
+    })
+
+    test('Should return null when no record exists with this id', async () => {
+      const collection = buildFakeCollection({
+        findOneAndUpdate: vi.fn().mockResolvedValue(null),
+        findOne: vi.fn().mockResolvedValue(null)
+      })
+      const db = buildFakeDb(collection)
+
+      expect(await applyCompletion(db, completionParams())).toBeNull()
+    })
+
+    test('Should throw CATCH_RECORD_COMPLETION_INELIGIBLE when the record exists but is not SUBMITTED', async () => {
+      const collection = buildFakeCollection({
+        findOneAndUpdate: vi.fn().mockResolvedValue(null),
+        findOne: vi.fn().mockResolvedValue({ status: 'DRAFT' })
+      })
+      const db = buildFakeDb(collection)
+
+      await expect(
+        applyCompletion(db, completionParams())
+      ).rejects.toMatchObject({
+        category: 'INVALID_LIFECYCLE_TRANSITION',
+        code: 'CATCH_RECORD_COMPLETION_INELIGIBLE'
+      })
+    })
+
+    test('Should throw VERSION_CONFLICT when the record is SUBMITTED but the version no longer matches', async () => {
+      const collection = buildFakeCollection({
+        findOneAndUpdate: vi.fn().mockResolvedValue(null),
+        findOne: vi.fn().mockResolvedValue({ status: 'SUBMITTED' })
+      })
+      const db = buildFakeDb(collection)
+
+      await expect(
+        applyCompletion(db, completionParams())
+      ).rejects.toMatchObject({ category: 'VERSION_CONFLICT' })
+    })
+
+    test('Should reject an invalid expectedVersion before calling the driver', async () => {
+      const collection = buildFakeCollection()
+      const db = buildFakeDb(collection)
+
+      await expect(
+        applyCompletion(db, completionParams({ expectedVersion: 0 }))
+      ).rejects.toThrow(TypeError)
+      expect(collection.findOneAndUpdate).not.toHaveBeenCalled()
+    })
+
+    test('Should translate an unexpected driver failure safely', async () => {
+      const collection = buildFakeCollection({
+        findOneAndUpdate: vi
+          .fn()
+          .mockRejectedValue(new Error('connection reset'))
+      })
+      const db = buildFakeDb(collection)
+
+      await expect(
+        applyCompletion(db, completionParams())
+      ).rejects.toMatchObject({ category: 'UNEXPECTED_INTERNAL_FAILURE' })
+    })
+  })
+
+  describe('applyEditStart', () => {
+    const expectedVersion = submittedExample.version
+
+    function editStartParams(overrides = {}) {
+      return {
+        id: submittedExample.id,
+        ownerUserId: submittedExample.ownerUserId,
+        expectedVersion,
+        updatedAt: '2026-10-07T09:00:00Z',
+        updatedBy: submittedExample.ownerUserId,
+        ...overrides
+      }
+    }
+
+    test('Should atomically match id/owner/version/eligible-status, committing DRAFT and incrementing version once', async () => {
+      const params = editStartParams()
+      const updatedDocument = {
+        ...toPersistenceDocument(submittedExample),
+        status: 'DRAFT',
+        hasUnsubmittedChanges: true,
+        updatedAt: params.updatedAt,
+        updatedBy: params.updatedBy,
+        version: expectedVersion + 1
+      }
+      const collection = buildFakeCollection({
+        findOneAndUpdate: vi.fn().mockResolvedValue(updatedDocument)
+      })
+      const db = buildFakeDb(collection)
+
+      const result = await applyEditStart(db, params)
+
+      expect(collection.findOneAndUpdate).toHaveBeenCalledExactlyOnceWith(
+        {
+          _id: submittedExample.id,
+          ownerUserId: submittedExample.ownerUserId,
+          status: { $in: ['SUBMITTED', 'COMPLETE'] },
+          version: expectedVersion
+        },
+        {
+          $set: {
+            status: 'DRAFT',
+            hasUnsubmittedChanges: true,
+            updatedAt: params.updatedAt,
+            updatedBy: params.updatedBy
+          },
+          $inc: { version: 1 }
+        },
+        { returnDocument: 'after' }
+      )
+      expect(result.status).toBe('DRAFT')
+      expect(result.hasUnsubmittedChanges).toBe(true)
+      expect(result.version).toBe(expectedVersion + 1)
+      // Preserved, never part of the $set.
+      expect(result.numberOfSubmissions).toBe(
+        submittedExample.numberOfSubmissions
+      )
+      expect(result.artifacts).toEqual(submittedExample.artifacts)
+    })
+
+    test('Should also match an eligible COMPLETE source record', async () => {
+      const params = {
+        id: completeExample.id,
+        ownerUserId: completeExample.ownerUserId,
+        expectedVersion: completeExample.version,
+        updatedAt: '2026-10-07T09:00:00Z',
+        updatedBy: completeExample.ownerUserId
+      }
+      const updatedDocument = {
+        ...toPersistenceDocument(completeExample),
+        status: 'DRAFT',
+        hasUnsubmittedChanges: true,
+        version: completeExample.version + 1
+      }
+      const collection = buildFakeCollection({
+        findOneAndUpdate: vi.fn().mockResolvedValue(updatedDocument)
+      })
+      const db = buildFakeDb(collection)
+
+      const result = await applyEditStart(db, params)
+
+      expect(result.status).toBe('DRAFT')
+      // completedAt/completedBy preserved unchanged, never cleared by edit-start.
+      expect(result.completedAt).toBe(completeExample.completedAt)
+      expect(result.completedBy).toBe(completeExample.completedBy)
+    })
+
+    test('Should return null when the record does not exist for this owner', async () => {
+      const collection = buildFakeCollection({
+        findOneAndUpdate: vi.fn().mockResolvedValue(null),
+        findOne: vi.fn().mockResolvedValue(null)
+      })
+      const db = buildFakeDb(collection)
+
+      expect(await applyEditStart(db, editStartParams())).toBeNull()
+    })
+
+    test('Should throw CATCH_RECORD_EDIT_START_INELIGIBLE for an already-DRAFT record', async () => {
+      const collection = buildFakeCollection({
+        findOneAndUpdate: vi.fn().mockResolvedValue(null),
+        findOne: vi.fn().mockResolvedValue({ status: 'DRAFT' })
+      })
+      const db = buildFakeDb(collection)
+
+      await expect(applyEditStart(db, editStartParams())).rejects.toMatchObject(
+        {
+          category: 'INVALID_LIFECYCLE_TRANSITION',
+          code: 'CATCH_RECORD_EDIT_START_INELIGIBLE'
+        }
+      )
+    })
+
+    test('Should throw VERSION_CONFLICT when the record is eligible but the version no longer matches', async () => {
+      const collection = buildFakeCollection({
+        findOneAndUpdate: vi.fn().mockResolvedValue(null),
+        findOne: vi.fn().mockResolvedValue({ status: 'SUBMITTED' })
+      })
+      const db = buildFakeDb(collection)
+
+      await expect(applyEditStart(db, editStartParams())).rejects.toMatchObject(
+        { category: 'VERSION_CONFLICT' }
+      )
+    })
+
+    test('Should translate an unexpected driver failure safely', async () => {
+      const collection = buildFakeCollection({
+        findOneAndUpdate: vi
+          .fn()
+          .mockRejectedValue(new Error('connection reset'))
+      })
+      const db = buildFakeDb(collection)
+
+      await expect(applyEditStart(db, editStartParams())).rejects.toMatchObject(
+        { category: 'UNEXPECTED_INTERNAL_FAILURE' }
+      )
     })
   })
 })

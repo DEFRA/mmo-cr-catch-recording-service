@@ -27,6 +27,23 @@ const REFERENCE_DATA_OPTIONS = {
   tracingHeader: 'x-cdp-request-id'
 }
 
+function matchesFilterValue(documentValue, filterValue) {
+  if (
+    filterValue &&
+    typeof filterValue === 'object' &&
+    Array.isArray(filterValue.$in)
+  ) {
+    return filterValue.$in.includes(documentValue)
+  }
+  return documentValue === filterValue
+}
+
+function matchesFilter(document, filter) {
+  return Object.entries(filter).every(([key, value]) =>
+    matchesFilterValue(document[key], value)
+  )
+}
+
 function fakeDb() {
   const store = new Map()
   const collections = {
@@ -37,11 +54,7 @@ function fakeDb() {
       }),
       findOne: vi.fn(async (filter) => {
         for (const document of store.values()) {
-          if (
-            Object.entries(filter).every(
-              ([key, value]) => document[key] === value
-            )
-          ) {
+          if (matchesFilter(document, filter)) {
             return document
           }
         }
@@ -49,11 +62,7 @@ function fakeDb() {
       }),
       findOneAndDelete: vi.fn(async (filter) => {
         for (const [id, document] of store.entries()) {
-          if (
-            Object.entries(filter).every(
-              ([key, value]) => document[key] === value
-            )
-          ) {
+          if (matchesFilter(document, filter)) {
             store.delete(id)
             return document
           }
@@ -62,11 +71,7 @@ function fakeDb() {
       }),
       findOneAndUpdate: vi.fn(async (filter, update) => {
         for (const [id, document] of store.entries()) {
-          if (
-            Object.entries(filter).every(
-              ([key, value]) => document[key] === value
-            )
-          ) {
+          if (matchesFilter(document, filter)) {
             const updated = { ...document, ...(update.$set ?? {}) }
             if (update.$inc) {
               for (const [key, amount] of Object.entries(update.$inc)) {
@@ -138,10 +143,109 @@ function fakeDb() {
         createIndex: vi.fn(),
         seed: (document) => historyStore.set(document._id, document)
       }
+    })(),
+    'catch-idempotency-claims': (() => {
+      const claimsStore = new Map()
+      const uniqueIndexFields = [
+        'ownerUserId',
+        'operationScope',
+        'idempotencyKey',
+        'resourceId'
+      ]
+      let nextId = 1
+      return {
+        insertOne: vi.fn(async (document) => {
+          for (const existing of claimsStore.values()) {
+            const isDuplicate = uniqueIndexFields.every(
+              (field) => existing[field] === document[field]
+            )
+            if (isDuplicate) {
+              const error = new Error('E11000 duplicate key error')
+              error.code = 11000
+              throw error
+            }
+          }
+          const id = document._id ?? `claim-${nextId++}`
+          claimsStore.set(id, { ...document, _id: id })
+          return { acknowledged: true, insertedId: id }
+        }),
+        findOne: vi.fn(async (filter) => {
+          for (const document of claimsStore.values()) {
+            if (
+              Object.entries(filter).every(
+                ([key, value]) => document[key] === value
+              )
+            ) {
+              return document
+            }
+          }
+          return null
+        }),
+        findOneAndUpdate: vi.fn(async (filter, update) => {
+          for (const [id, document] of claimsStore.entries()) {
+            if (
+              Object.entries(filter).every(
+                ([key, value]) => document[key] === value
+              )
+            ) {
+              const updated = { ...document, ...(update.$set ?? {}) }
+              claimsStore.set(id, updated)
+              return updated
+            }
+          }
+          return null
+        }),
+        createIndex: vi.fn()
+      }
     })()
   }
 
   return { collection: (name) => collections[name], collections }
+}
+
+function fakeCatchArtifactStore() {
+  const objects = new Map()
+  return {
+    objects,
+    commitArtifact: vi.fn(async ({ key, body, contentType }) => {
+      const existing = objects.get(key)
+      if (existing) {
+        return {
+          key,
+          checksum: existing.checksum,
+          contentLength: existing.body.length,
+          contentType,
+          reused: true
+        }
+      }
+      objects.set(key, { body, checksum: `checksum-${key}` })
+      return {
+        key,
+        checksum: `checksum-${key}`,
+        contentLength: body.length,
+        contentType,
+        reused: false
+      }
+    }),
+    retrieveArtifact: vi.fn(async (key) => {
+      const existing = objects.get(key)
+      if (!existing) {
+        const { ApplicationError } =
+          await import('#/common/helpers/errors/application-error.js')
+        throw new ApplicationError({
+          category: 'RESOURCE_NOT_FOUND',
+          code: 'CATCH_ARTIFACT_NOT_FOUND',
+          message: 'not found'
+        })
+      }
+      return {
+        body: existing.body,
+        contentType: 'application/octet-stream',
+        contentLength: existing.body.length,
+        checksum: existing.checksum
+      }
+    })
+  }
 }
 
 async function createTestServer() {
@@ -160,9 +264,14 @@ async function createTestServer() {
   const db = fakeDb()
   server.decorate('request', 'db', () => db, { apply: true })
 
+  const catchArtifactStore = fakeCatchArtifactStore()
+  server.decorate('request', 'catchArtifactStore', () => catchArtifactStore, {
+    apply: true
+  })
+
   server.route(catchRecords)
 
-  return { server, db }
+  return { server, db, catchArtifactStore }
 }
 
 function validVesselBody() {
@@ -541,6 +650,59 @@ describe('PATCH /v1/catch-records/{catchRecordId}', () => {
     expect(response.statusCode).toBe(200)
     const body = JSON.parse(response.payload)
     expect(body.savedSection).toBe('pairFishing')
+  })
+
+  test('appends AMENDMENT_SECTION_SAVED (not SECTION_SAVED) when saving a section of an amended draft', async () => {
+    const { server, db } = await createTestServer()
+    db.collections['catch-records'].seed(
+      eligibleDraftDocument({
+        numberOfSubmissions: 1,
+        hasUnsubmittedChanges: true,
+        submittedAt: '2026-10-05T10:00:00Z',
+        submittedBy: 'owner-1',
+        artifacts: [
+          { submissionNumber: 1, type: 'JSON_SNAPSHOT' },
+          { submissionNumber: 1, type: 'PDF_RECEIPT' }
+        ]
+      })
+    )
+    fetchMock.mockResponseOnce(
+      JSON.stringify({ actorId: 'owner-1', permissions: [] })
+    )
+
+    const response = await server.inject({
+      method: 'PATCH',
+      url: '/v1/catch-records/record-1',
+      headers: { authorization: 'Bearer token-1', 'if-match': '1' },
+      payload: { section: 'pairFishing', data: { enabled: false } }
+    })
+
+    expect(response.statusCode).toBe(200)
+    const body = JSON.parse(response.payload)
+    expect(body.displayStatus).toBe('Amended')
+
+    const historyInsert =
+      db.collections['catch-record-history'].insertOne.mock.calls[0][0]
+    expect(historyInsert.eventType).toBe('AMENDMENT_SECTION_SAVED')
+  })
+
+  test('returns 409 for a section save on a SUBMITTED record (must edit-start first)', async () => {
+    const { server, db } = await createTestServer()
+    db.collections['catch-records'].seed(
+      eligibleDraftDocument({ status: 'SUBMITTED', numberOfSubmissions: 1 })
+    )
+    fetchMock.mockResponseOnce(
+      JSON.stringify({ actorId: 'owner-1', permissions: [] })
+    )
+
+    const response = await server.inject({
+      method: 'PATCH',
+      url: '/v1/catch-records/record-1',
+      headers: { authorization: 'Bearer token-1', 'if-match': '1' },
+      payload: { section: 'pairFishing', data: { enabled: false } }
+    })
+
+    expect(response.statusCode).toBe(409)
   })
 
   test('rejects an unsupported section name with 400', async () => {
@@ -1666,5 +1828,705 @@ describe('GET /v1/catch-records/{catchRecordId}/history', () => {
     expect(
       db.collections['catch-record-history'].insertOne
     ).not.toHaveBeenCalled()
+  })
+})
+
+function completeEligibleDraftDocument(overrides = {}) {
+  return eligibleDraftDocument({
+    vessel: {
+      id: 'vessel-1',
+      rssSnapshot: 'RSS123456',
+      nameSnapshot: 'EXAMPLE VESSEL',
+      externalMarkSnapshot: 'PZ1'
+    },
+    trip: {
+      startedAndFinishedToday: true,
+      dateStarted: '2026-10-05',
+      dateEnded: '2026-10-05',
+      departurePort: {
+        id: 'port-1',
+        codeSnapshot: '0349',
+        nameSnapshot: 'Plymouth'
+      },
+      returnPort: {
+        id: 'port-1',
+        codeSnapshot: '0349',
+        nameSnapshot: 'Plymouth'
+      }
+    },
+    pairFishing: { enabled: false, pairVessel: null, pairSkipperName: null },
+    gears: [
+      {
+        associationId: 'gear-assoc-1',
+        gear: {
+          id: 'gear-1',
+          codeSnapshot: 'GEAR001',
+          nameSnapshot: 'Otter trawl'
+        },
+        characteristics: [
+          { characteristicId: 'char-1', nameSnapshot: 'Mesh size', value: 80 }
+        ],
+        statisticalArea: {
+          id: 'area-1',
+          codeSnapshot: '46F45',
+          nameSnapshot: 'ICES 46F45'
+        },
+        speciesCaught: [
+          {
+            id: 'species-1',
+            faoCodeSnapshot: 'COD',
+            nameSnapshot: 'Cod',
+            weightAboveMinimumKg: 5
+          }
+        ]
+      }
+    ],
+    speciesNotLanded: [],
+    artifacts: [],
+    hasUnsubmittedChanges: false,
+    ...overrides
+  })
+}
+
+function mockSubmissionReferenceData() {
+  // `mockResponseIf` replaces the mock implementation outright on each call (it does not compose with
+  // an earlier `mockResponseIf`/`mockResponse` registration) - a single dispatcher function covering
+  // every endpoint this validation pass calls is required instead of one `mockResponseIf` per endpoint.
+  fetchMock.mockResponse((req) => {
+    const { url } = req
+
+    if (url.includes('/validate')) {
+      return JSON.stringify({ actorId: 'owner-1', permissions: [] })
+    }
+
+    if (
+      url.includes('/reference-data/vessels/vessel-1') &&
+      !url.includes('favourite')
+    ) {
+      return JSON.stringify(validVesselBody())
+    }
+
+    if (
+      url.includes('/reference-data/vessels') &&
+      !url.includes('/vessels/vessel-1')
+    ) {
+      return JSON.stringify([{ id: 'vessel-1' }])
+    }
+
+    if (url.includes('/reference-data/ports/port-1')) {
+      return JSON.stringify({
+        id: 'port-1',
+        code: '0349',
+        name: 'Plymouth',
+        countryCode: 'GB',
+        coordinate: null,
+        active: true
+      })
+    }
+
+    if (url.includes('/reference-data/gears')) {
+      return JSON.stringify(
+        gearCollectionResponse({ gearId: 'gear-1', characteristicId: 'char-1' })
+      )
+    }
+
+    if (url.includes('/reference-data/map/statistical-areas/area-1')) {
+      return JSON.stringify(statisticalAreaFeatureResponse({ id: 'area-1' }))
+    }
+
+    if (url.includes('/reference-data/species/species-1')) {
+      return JSON.stringify(
+        speciesResponse({ id: 'species-1', faoCode: 'COD', commonName: 'Cod' })
+      )
+    }
+
+    return { status: 404, body: JSON.stringify({ error: 'unmocked url' }) }
+  })
+}
+
+describe('POST /v1/catch-records/{catchRecordId}/submission', () => {
+  test('submits an eligible, complete draft for the first time and returns 200 with submission evidence', async () => {
+    const { server, db, catchArtifactStore } = await createTestServer()
+    db.collections['catch-records'].seed(completeEligibleDraftDocument())
+    mockSubmissionReferenceData()
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/v1/catch-records/record-1/submission',
+      headers: { authorization: 'Bearer token-1', 'if-match': '1' }
+    })
+
+    expect(response.statusCode).toBe(200)
+    const body = JSON.parse(response.payload)
+    expect(body.status).toBe('SUBMITTED')
+    expect(body.displayStatus).toBe('Submitted')
+    expect(body.version).toBe(2)
+    expect(body.submittedAt).toEqual(expect.any(String))
+    expect(body.submittedBy).toBe('owner-1')
+    expect(body.artifacts).toHaveLength(2)
+    expect(catchArtifactStore.commitArtifact).toHaveBeenCalledTimes(2)
+
+    const historyInsert =
+      db.collections['catch-record-history'].insertOne.mock.calls[0][0]
+    expect(historyInsert.eventType).toBe('SUBMITTED')
+  })
+
+  test('rejects a missing/malformed If-Match header with 400', async () => {
+    const { server } = await createTestServer()
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/v1/catch-records/record-1/submission',
+      headers: { authorization: 'Bearer token-1' }
+    })
+
+    expect(response.statusCode).toBe(400)
+  })
+
+  test('rejects an unauthenticated request with 401', async () => {
+    const { server } = await createTestServer()
+    fetchMock.mockResponseIf(
+      (req) => req.url.includes('/validate'),
+      JSON.stringify({}),
+      { status: 401 }
+    )
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/v1/catch-records/record-1/submission',
+      headers: { authorization: 'Bearer token-1', 'if-match': '1' }
+    })
+
+    expect(response.statusCode).toBe(401)
+  })
+
+  test('returns 404 for a catch record that does not exist', async () => {
+    const { server } = await createTestServer()
+    fetchMock.mockResponseIf(
+      (req) => req.url.includes('/validate'),
+      JSON.stringify({ actorId: 'owner-1', permissions: [] })
+    )
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/v1/catch-records/does-not-exist/submission',
+      headers: { authorization: 'Bearer token-1', 'if-match': '1' }
+    })
+
+    expect(response.statusCode).toBe(404)
+  })
+
+  test('returns 409 for a record that is not eligible for submission', async () => {
+    const { server, db } = await createTestServer()
+    db.collections['catch-records'].seed(
+      completeEligibleDraftDocument({
+        status: 'SUBMITTED',
+        numberOfSubmissions: 1,
+        submittedAt: '2026-10-05T10:00:00Z',
+        submittedBy: 'owner-1',
+        artifacts: [
+          { submissionNumber: 1, type: 'JSON_SNAPSHOT' },
+          { submissionNumber: 1, type: 'PDF_RECEIPT' }
+        ]
+      })
+    )
+    fetchMock.mockResponseIf(
+      (req) => req.url.includes('/validate'),
+      JSON.stringify({ actorId: 'owner-1', permissions: [] })
+    )
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/v1/catch-records/record-1/submission',
+      headers: { authorization: 'Bearer token-1', 'if-match': '1' }
+    })
+
+    expect(response.statusCode).toBe(409)
+  })
+
+  test('returns 422 for an incomplete draft (missing species caught)', async () => {
+    const { server, db } = await createTestServer()
+    db.collections['catch-records'].seed(
+      completeEligibleDraftDocument({
+        gears: [
+          {
+            associationId: 'gear-assoc-1',
+            gear: {
+              id: 'gear-1',
+              codeSnapshot: 'GEAR001',
+              nameSnapshot: 'Otter trawl'
+            },
+            characteristics: [
+              {
+                characteristicId: 'char-1',
+                nameSnapshot: 'Mesh size',
+                value: 80
+              }
+            ],
+            statisticalArea: {
+              id: 'area-1',
+              codeSnapshot: '46F45',
+              nameSnapshot: 'ICES 46F45'
+            },
+            speciesCaught: []
+          }
+        ]
+      })
+    )
+    mockSubmissionReferenceData()
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/v1/catch-records/record-1/submission',
+      headers: { authorization: 'Bearer token-1', 'if-match': '1' }
+    })
+
+    expect(response.statusCode).toBe(422)
+  })
+
+  test('is idempotent when the same Idempotency-Key is replayed', async () => {
+    const { server, db, catchArtifactStore } = await createTestServer()
+    db.collections['catch-records'].seed(completeEligibleDraftDocument())
+    mockSubmissionReferenceData()
+
+    const first = await server.inject({
+      method: 'POST',
+      url: '/v1/catch-records/record-1/submission',
+      headers: {
+        authorization: 'Bearer token-1',
+        'if-match': '1',
+        'idempotency-key': 'retry-key'
+      }
+    })
+    const second = await server.inject({
+      method: 'POST',
+      url: '/v1/catch-records/record-1/submission',
+      headers: {
+        authorization: 'Bearer token-1',
+        'if-match': '1',
+        'idempotency-key': 'retry-key'
+      }
+    })
+
+    expect(first.statusCode).toBe(200)
+    expect(second.statusCode).toBe(200)
+    expect(JSON.parse(first.payload)).toEqual(JSON.parse(second.payload))
+    expect(catchArtifactStore.commitArtifact).toHaveBeenCalledTimes(2)
+  })
+})
+
+function submittedDraftDocument(overrides = {}) {
+  return completeEligibleDraftDocument({
+    status: 'SUBMITTED',
+    numberOfSubmissions: 1,
+    submittedAt: '2026-10-05T10:00:00Z',
+    submittedBy: 'owner-1',
+    artifacts: [
+      {
+        submissionNumber: 1,
+        type: 'JSON_SNAPSHOT',
+        contentType: 'application/json; charset=utf-8',
+        contentLength: 2,
+        checksum: 'json-checksum'
+      },
+      {
+        submissionNumber: 1,
+        type: 'PDF_RECEIPT',
+        contentType: 'application/pdf',
+        contentLength: 4,
+        checksum: 'pdf-checksum'
+      }
+    ],
+    ...overrides
+  })
+}
+
+describe('GET /v1/catch-records/{catchRecordId}/submissions', () => {
+  test('lists the committed submission', async () => {
+    const { server, db } = await createTestServer()
+    db.collections['catch-records'].seed(submittedDraftDocument())
+    fetchMock.mockResponseIf(
+      (req) => req.url.includes('/validate'),
+      JSON.stringify({ actorId: 'owner-1', permissions: [] })
+    )
+
+    const response = await server.inject({
+      method: 'GET',
+      url: '/v1/catch-records/record-1/submissions',
+      headers: { authorization: 'Bearer token-1' }
+    })
+
+    expect(response.statusCode).toBe(200)
+    const body = JSON.parse(response.payload)
+    expect(body.count).toBe(1)
+    expect(body.submissions).toEqual([
+      {
+        submissionNumber: 1,
+        artifacts: [
+          {
+            type: 'json',
+            contentType: 'application/json; charset=utf-8',
+            contentLength: 2,
+            checksum: 'json-checksum'
+          },
+          {
+            type: 'pdf',
+            contentType: 'application/pdf',
+            contentLength: 4,
+            checksum: 'pdf-checksum'
+          }
+        ]
+      }
+    ])
+  })
+
+  test('returns 404 for a catch record that does not exist', async () => {
+    const { server } = await createTestServer()
+    fetchMock.mockResponseIf(
+      (req) => req.url.includes('/validate'),
+      JSON.stringify({ actorId: 'owner-1', permissions: [] })
+    )
+
+    const response = await server.inject({
+      method: 'GET',
+      url: '/v1/catch-records/does-not-exist/submissions',
+      headers: { authorization: 'Bearer token-1' }
+    })
+
+    expect(response.statusCode).toBe(404)
+  })
+
+  test('returns 404 (not 200 with another owner data) for a horizontal access attempt', async () => {
+    const { server, db } = await createTestServer()
+    db.collections['catch-records'].seed(submittedDraftDocument())
+    fetchMock.mockResponseIf(
+      (req) => req.url.includes('/validate'),
+      JSON.stringify({ actorId: 'a-different-owner', permissions: [] })
+    )
+
+    const response = await server.inject({
+      method: 'GET',
+      url: '/v1/catch-records/record-1/submissions',
+      headers: { authorization: 'Bearer token-1' }
+    })
+
+    expect(response.statusCode).toBe(404)
+  })
+})
+
+describe('GET /v1/catch-records/{catchRecordId}/submissions/{submissionNumber}/{artifactType}', () => {
+  function seedArtifactBytes(catchArtifactStore) {
+    catchArtifactStore.objects.set(
+      'catch-records/record-1/submissions/1/snapshot.json',
+      { body: Buffer.from('{}'), checksum: 'json-checksum' }
+    )
+    catchArtifactStore.objects.set(
+      'catch-records/record-1/submissions/1/receipt.pdf',
+      { body: Buffer.from('%PDF'), checksum: 'pdf-checksum' }
+    )
+  }
+
+  test('retrieves the committed JSON snapshot with safe download headers', async () => {
+    const { server, db, catchArtifactStore } = await createTestServer()
+    db.collections['catch-records'].seed(submittedDraftDocument())
+    seedArtifactBytes(catchArtifactStore)
+    fetchMock.mockResponseIf(
+      (req) => req.url.includes('/validate'),
+      JSON.stringify({ actorId: 'owner-1', permissions: [] })
+    )
+
+    const response = await server.inject({
+      method: 'GET',
+      url: '/v1/catch-records/record-1/submissions/1/json',
+      headers: { authorization: 'Bearer token-1' }
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.headers['content-type']).toContain('application/json')
+    expect(response.headers['content-disposition']).toContain('attachment')
+    expect(response.headers['content-disposition']).toContain(
+      'GBR-RSS123456-051026-113500-submission-1.json'
+    )
+    expect(response.rawPayload.toString('utf8')).toBe('{}')
+  })
+
+  test('retrieves the committed PDF receipt', async () => {
+    const { server, db, catchArtifactStore } = await createTestServer()
+    db.collections['catch-records'].seed(submittedDraftDocument())
+    seedArtifactBytes(catchArtifactStore)
+    fetchMock.mockResponseIf(
+      (req) => req.url.includes('/validate'),
+      JSON.stringify({ actorId: 'owner-1', permissions: [] })
+    )
+
+    const response = await server.inject({
+      method: 'GET',
+      url: '/v1/catch-records/record-1/submissions/1/pdf',
+      headers: { authorization: 'Bearer token-1' }
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.headers['content-type']).toContain('application/pdf')
+    expect(response.rawPayload.toString('latin1')).toBe('%PDF')
+  })
+
+  test('rejects an unsupported artifact type with a safe 400', async () => {
+    const { server, db } = await createTestServer()
+    db.collections['catch-records'].seed(submittedDraftDocument())
+    fetchMock.mockResponseIf(
+      (req) => req.url.includes('/validate'),
+      JSON.stringify({ actorId: 'owner-1', permissions: [] })
+    )
+
+    const response = await server.inject({
+      method: 'GET',
+      url: '/v1/catch-records/record-1/submissions/1/xml',
+      headers: { authorization: 'Bearer token-1' }
+    })
+
+    expect(response.statusCode).toBe(400)
+  })
+
+  test('rejects a zero/negative/fractional submission number with a safe 400', async () => {
+    const { server, db } = await createTestServer()
+    db.collections['catch-records'].seed(submittedDraftDocument())
+    fetchMock.mockResponseIf(
+      (req) => req.url.includes('/validate'),
+      JSON.stringify({ actorId: 'owner-1', permissions: [] })
+    )
+
+    const response = await server.inject({
+      method: 'GET',
+      url: '/v1/catch-records/record-1/submissions/0/json',
+      headers: { authorization: 'Bearer token-1' }
+    })
+
+    expect(response.statusCode).toBe(400)
+  })
+
+  test('returns 404 for an uncommitted submission number without calling object storage', async () => {
+    const { server, db, catchArtifactStore } = await createTestServer()
+    db.collections['catch-records'].seed(submittedDraftDocument())
+    seedArtifactBytes(catchArtifactStore)
+    fetchMock.mockResponseIf(
+      (req) => req.url.includes('/validate'),
+      JSON.stringify({ actorId: 'owner-1', permissions: [] })
+    )
+
+    const response = await server.inject({
+      method: 'GET',
+      url: '/v1/catch-records/record-1/submissions/99/json',
+      headers: { authorization: 'Bearer token-1' }
+    })
+
+    expect(response.statusCode).toBe(404)
+    expect(catchArtifactStore.retrieveArtifact).not.toHaveBeenCalled()
+  })
+
+  test('returns 404 for a horizontal access attempt rather than disclosing artifact existence', async () => {
+    const { server, db, catchArtifactStore } = await createTestServer()
+    db.collections['catch-records'].seed(submittedDraftDocument())
+    seedArtifactBytes(catchArtifactStore)
+    fetchMock.mockResponseIf(
+      (req) => req.url.includes('/validate'),
+      JSON.stringify({ actorId: 'a-different-owner', permissions: [] })
+    )
+
+    const response = await server.inject({
+      method: 'GET',
+      url: '/v1/catch-records/record-1/submissions/1/json',
+      headers: { authorization: 'Bearer token-1' }
+    })
+
+    expect(response.statusCode).toBe(404)
+    expect(catchArtifactStore.retrieveArtifact).not.toHaveBeenCalled()
+  })
+})
+
+describe('POST /v1/catch-records/{catchRecordId}/completion', () => {
+  test('completes an eligible submitted record for a caller with the exact completion scope', async () => {
+    const { server, db } = await createTestServer()
+    db.collections['catch-records'].seed(submittedDraftDocument())
+    fetchMock.mockResponseIf(
+      (req) => req.url.includes('/validate'),
+      JSON.stringify({
+        actorId: 'admin-1',
+        permissions: ['catch-recording.complete']
+      })
+    )
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/v1/catch-records/record-1/completion',
+      headers: { authorization: 'Bearer token-1', 'if-match': '1' }
+    })
+
+    expect(response.statusCode).toBe(200)
+    const body = JSON.parse(response.payload)
+    expect(body.status).toBe('COMPLETE')
+    expect(body.completedBy).toBe('admin-1')
+
+    const historyInsert =
+      db.collections['catch-record-history'].insertOne.mock.calls[0][0]
+    expect(historyInsert.eventType).toBe('COMPLETED')
+    expect(historyInsert.ownerUserId).toBe('owner-1')
+    expect(historyInsert.actorUserId).toBe('admin-1')
+  })
+
+  test('rejects an authenticated caller lacking the completion scope with 403', async () => {
+    const { server, db } = await createTestServer()
+    db.collections['catch-records'].seed(submittedDraftDocument())
+    fetchMock.mockResponseIf(
+      (req) => req.url.includes('/validate'),
+      JSON.stringify({ actorId: 'owner-1', permissions: [] })
+    )
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/v1/catch-records/record-1/completion',
+      headers: { authorization: 'Bearer token-1', 'if-match': '1' }
+    })
+
+    expect(response.statusCode).toBe(403)
+  })
+
+  test('returns 409 for a DRAFT record (not eligible for completion)', async () => {
+    const { server, db } = await createTestServer()
+    db.collections['catch-records'].seed(completeEligibleDraftDocument())
+    fetchMock.mockResponseIf(
+      (req) => req.url.includes('/validate'),
+      JSON.stringify({
+        actorId: 'admin-1',
+        permissions: ['catch-recording.complete']
+      })
+    )
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/v1/catch-records/record-1/completion',
+      headers: { authorization: 'Bearer token-1', 'if-match': '1' }
+    })
+
+    expect(response.statusCode).toBe(409)
+  })
+
+  test('returns 404 for a catch record that does not exist', async () => {
+    const { server } = await createTestServer()
+    fetchMock.mockResponseIf(
+      (req) => req.url.includes('/validate'),
+      JSON.stringify({
+        actorId: 'admin-1',
+        permissions: ['catch-recording.complete']
+      })
+    )
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/v1/catch-records/does-not-exist/completion',
+      headers: { authorization: 'Bearer token-1', 'if-match': '1' }
+    })
+
+    expect(response.statusCode).toBe(404)
+  })
+
+  test('rejects a missing/malformed If-Match header with 400', async () => {
+    const { server } = await createTestServer()
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/v1/catch-records/record-1/completion',
+      headers: { authorization: 'Bearer token-1' }
+    })
+
+    expect(response.statusCode).toBe(400)
+  })
+})
+
+describe('POST /v1/catch-records/{catchRecordId}/edit-start', () => {
+  test('returns an eligible submitted record to DRAFT with hasUnsubmittedChanges = true', async () => {
+    const { server, db } = await createTestServer()
+    db.collections['catch-records'].seed(submittedDraftDocument())
+    fetchMock.mockResponseIf(
+      (req) => req.url.includes('/validate'),
+      JSON.stringify({ actorId: 'owner-1', permissions: [] })
+    )
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/v1/catch-records/record-1/edit-start',
+      headers: { authorization: 'Bearer token-1', 'if-match': '1' }
+    })
+
+    expect(response.statusCode).toBe(200)
+    const body = JSON.parse(response.payload)
+    expect(body.status).toBe('DRAFT')
+    expect(body.displayStatus).toBe('Amended')
+    expect(body.progress.hasUnsubmittedChanges).toBe(true)
+
+    const historyInsert =
+      db.collections['catch-record-history'].insertOne.mock.calls[0][0]
+    expect(historyInsert.eventType).toBe('EDIT_STARTED')
+  })
+
+  test('returns 409 for an already-DRAFT record', async () => {
+    const { server, db } = await createTestServer()
+    db.collections['catch-records'].seed(completeEligibleDraftDocument())
+    fetchMock.mockResponseIf(
+      (req) => req.url.includes('/validate'),
+      JSON.stringify({ actorId: 'owner-1', permissions: [] })
+    )
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/v1/catch-records/record-1/edit-start',
+      headers: { authorization: 'Bearer token-1', 'if-match': '1' }
+    })
+
+    expect(response.statusCode).toBe(409)
+  })
+
+  test('returns 404 for a catch record that does not exist', async () => {
+    const { server } = await createTestServer()
+    fetchMock.mockResponseIf(
+      (req) => req.url.includes('/validate'),
+      JSON.stringify({ actorId: 'owner-1', permissions: [] })
+    )
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/v1/catch-records/does-not-exist/edit-start',
+      headers: { authorization: 'Bearer token-1', 'if-match': '1' }
+    })
+
+    expect(response.statusCode).toBe(404)
+  })
+
+  test('returns 404 for a horizontal edit-start attempt by a different owner', async () => {
+    const { server, db } = await createTestServer()
+    db.collections['catch-records'].seed(submittedDraftDocument())
+    fetchMock.mockResponseIf(
+      (req) => req.url.includes('/validate'),
+      JSON.stringify({ actorId: 'a-different-owner', permissions: [] })
+    )
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/v1/catch-records/record-1/edit-start',
+      headers: { authorization: 'Bearer token-1', 'if-match': '1' }
+    })
+
+    expect(response.statusCode).toBe(404)
+  })
+
+  test('rejects a missing/malformed If-Match header with 400', async () => {
+    const { server } = await createTestServer()
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/v1/catch-records/record-1/edit-start',
+      headers: { authorization: 'Bearer token-1' }
+    })
+
+    expect(response.statusCode).toBe(400)
   })
 })

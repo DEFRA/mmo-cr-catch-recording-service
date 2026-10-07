@@ -193,6 +193,40 @@ export const config = convict({
       default: 100,
       env: 'REFERENCE_DATA_SERVICE_RETRY_DELAY_MS'
     }
+  },
+  catchArtifacts: {
+    bucketName: {
+      doc: 'S3-compatible bucket name used for immutable Catch Record submission artifacts (canonical JSON snapshots and PDF receipts). No credential is configured here - the AWS SDK default credential provider chain is used (env vars locally, an IAM task role in deployed CDP environments).',
+      format: String,
+      nullable: true,
+      default: null,
+      env: 'CATCH_ARTIFACTS_BUCKET'
+    },
+    region: {
+      doc: 'AWS region for the S3-compatible artifact bucket',
+      format: String,
+      default: 'eu-west-2',
+      env: 'AWS_REGION'
+    },
+    endpoint: {
+      doc: 'Optional S3-compatible endpoint override (e.g. the local floci emulator). Null uses the default AWS endpoint for the configured region.',
+      format: String,
+      nullable: true,
+      default: null,
+      env: 'AWS_ENDPOINT_URL'
+    },
+    forcePathStyle: {
+      doc: 'Use path-style S3 addressing. Required by local S3-compatible emulators such as floci; must remain false against real AWS S3.',
+      format: Boolean,
+      default: false,
+      env: 'CATCH_ARTIFACTS_FORCE_PATH_STYLE'
+    },
+    maxPdfRenderedItems: {
+      doc: 'A pragmatic rendering-safety bound: the maximum number of gear/species entries rendered into a PDF receipt (approved PDF safety-limit decision - Step 33, no externally mandated value exists).',
+      format: 'nat',
+      default: 200,
+      env: 'CATCH_ARTIFACTS_MAX_PDF_RENDERED_ITEMS'
+    }
   }
 })
 

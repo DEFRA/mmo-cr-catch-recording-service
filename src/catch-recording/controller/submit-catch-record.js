@@ -1,0 +1,523 @@
+import {
+  ApplicationError,
+  isApplicationError
+} from '#/common/helpers/errors/application-error.js'
+import { validateSubmissionReadiness } from '#/catch-recording/validation/submission-readiness.js'
+import { calculateNextSubmissionNumber } from '#/catch-recording/domain/submission-number.js'
+import {
+  canSubmitFirstTime,
+  canResubmit
+} from '#/catch-recording/domain/lifecycle-transitions.js'
+import {
+  findCatchRecordByIdForOwner,
+  applySubmission
+} from '#/catch-recording/persistence/catch-persistence.js'
+import {
+  appendCatchHistoryEvent,
+  CATCH_HISTORY_EVENT_TYPES
+} from '#/catch-recording/persistence/catch-history-persistence.js'
+import {
+  claimIdempotency,
+  completeIdempotencyClaim,
+  IDEMPOTENCY_CLAIM_OUTCOMES
+} from '#/catch-recording/persistence/catch-idempotency-persistence.js'
+import { IDEMPOTENCY_OPERATION_SCOPES } from '#/catch-recording/persistence/idempotency-operation-scope.js'
+import { computeRequestFingerprint } from '#/catch-recording/persistence/idempotency-fingerprint.js'
+import {
+  storeSubmissionArtifacts,
+  retrieveCommittedArtifact,
+  ARTIFACT_TYPES
+} from '#/catch-recording/artifact/catch-artifact.js'
+import { generateSubmissionReceiptPdf } from '#/catch-recording/pdf/pdf-generator.js'
+import { buildStandardSaveResponse } from './standard-save-response.js'
+
+/**
+ * Step 34/38: the `CatchSubmission` idempotent submission use case (`POST
+ * /v1/catch-records/{catchRecordId}/submission`), reused identically for first submission and
+ * resubmission of an amended draft - the same function, the same persistence primitive, the same
+ * artifact pipeline, differing only in which lifecycle policy accepted it and which history event type
+ * is appended.
+ *
+ * Orchestrates, in the approved order: an owner-scoped existing-record read, optional targeted
+ * idempotency (replaying a prior completed result unchanged), lifecycle eligibility (Step 08's
+ * `canSubmitFirstTime`/`canResubmit`), complete validation (Step 32's `validateSubmissionReadiness`),
+ * deterministic submission-number calculation, deterministic-recovery-aware snapshot construction,
+ * sequential JSON-then-PDF artifact commitment (Step 33), atomic `SUBMITTED` commitment (Step 34's
+ * `applySubmission`), and append-only history.
+ */
+
+const ALLOWED_IDEMPOTENCY_FIELDS = Object.freeze(['expectedVersion'])
+const ALLOWED_IDEMPOTENCY_RESULT_FIELDS = Object.freeze(['id'])
+
+function trustedNowIso() {
+  return new Date().toISOString()
+}
+
+function catchRecordNotFoundError() {
+  return new ApplicationError({
+    category: 'RESOURCE_NOT_FOUND',
+    code: 'CATCH_RECORD_NOT_FOUND',
+    message: 'The requested catch record could not be found.'
+  })
+}
+
+function submissionIneligibleError() {
+  return new ApplicationError({
+    category: 'INVALID_LIFECYCLE_TRANSITION',
+    code: 'CATCH_RECORD_SUBMISSION_INELIGIBLE',
+    message:
+      'Only a never-submitted draft or an amended draft may be submitted.'
+  })
+}
+
+function submissionValidationError(issues) {
+  return new ApplicationError({
+    category: 'BUSINESS_VALIDATION_FAILURE',
+    code: 'SUBMISSION_VALIDATION_FAILED',
+    message: 'The catch record is not ready for submission.',
+    details: issues
+  })
+}
+
+async function startIdempotencyClaim({
+  db,
+  ownerUserId,
+  catchRecordId,
+  idempotencyKey,
+  operationScope,
+  expectedVersion
+}) {
+  const fingerprint = computeRequestFingerprint({
+    operationScope,
+    idempotencyKey,
+    allowedFields: ALLOWED_IDEMPOTENCY_FIELDS,
+    semanticInput: { expectedVersion }
+  })
+
+  const claim = await claimIdempotency(db, {
+    ownerUserId,
+    operationScope,
+    idempotencyKey,
+    resourceId: catchRecordId,
+    fingerprint
+  })
+
+  if (claim.outcome === IDEMPOTENCY_CLAIM_OUTCOMES.IN_PROGRESS) {
+    throw new ApplicationError({
+      category: 'IDEMPOTENCY_CONFLICT',
+      code: 'IDEMPOTENCY_REQUEST_IN_PROGRESS',
+      message: 'An identical request is already being processed.'
+    })
+  }
+
+  return { fingerprint, claim }
+}
+
+/**
+ * The approved submission response: the existing standard save response, extended with the submission
+ * facts a caller needs to confirm what was just committed. `savedSection` stays `null` - no single
+ * section applies to a whole-record submission.
+ *
+ * @param {object} catchRecord the committed, persisted canonical record
+ * @returns {Readonly<object>}
+ */
+function buildSubmissionResponse(catchRecord) {
+  return Object.freeze({
+    ...buildStandardSaveResponse(catchRecord),
+    submittedAt: catchRecord.submittedAt,
+    submittedBy: catchRecord.submittedBy,
+    artifacts: catchRecord.artifacts
+  })
+}
+
+/**
+ * Builds the exact immutable snapshot that will be stored as the JSON artifact and used to generate the
+ * PDF receipt. Excludes `artifacts` (which describes the submission, not itself - including it would be
+ * self-referential) and the purely mechanical `version` counter (an optimistic-concurrency detail, not
+ * business evidence). Never mutates `catchRecord`.
+ *
+ * @param {object} catchRecord the authoritative persisted record (pre-commit)
+ * @param {{ submissionNumber: number, submittedAt: string, submittedBy: string }} facts
+ * @returns {object}
+ */
+function buildImmutableSnapshot(
+  catchRecord,
+  { submissionNumber, submittedAt, submittedBy }
+) {
+  const { artifacts, version, ...businessFields } = catchRecord
+
+  return {
+    ...businessFields,
+    status: 'SUBMITTED',
+    numberOfSubmissions: submissionNumber,
+    hasUnsubmittedChanges: false,
+    submittedAt,
+    submittedBy,
+    updatedAt: submittedAt,
+    updatedBy: submittedBy
+  }
+}
+
+/**
+ * Deterministic-recovery-aware snapshot resolution: if a prior attempt already committed the JSON
+ * snapshot for this exact `(catchRecordId, submissionNumber)` before crashing (e.g. before the database
+ * commit completed), that committed snapshot is the authoritative one - it is fetched and reused
+ * unchanged rather than rebuilt with a new timestamp, so the subsequent artifact commit calls see
+ * byte-identical content and safely reuse the existing objects instead of raising an integrity conflict.
+ * Only a genuine "not found" is treated as "no prior attempt"; any other artifact-retrieval failure
+ * propagates unchanged.
+ *
+ * @returns {Promise<object>} the snapshot to use (fresh or recovered)
+ */
+async function resolveSubmissionSnapshot({
+  catchArtifactStore,
+  catchRecord,
+  catchRecordId,
+  submissionNumber,
+  ownerUserId
+}) {
+  try {
+    const existingJson = await retrieveCommittedArtifact(catchArtifactStore, {
+      catchRecordId,
+      submissionNumber,
+      type: ARTIFACT_TYPES.JSON_SNAPSHOT
+    })
+    return JSON.parse(existingJson.body.toString('utf8'))
+  } catch (error) {
+    if (!(
+      isApplicationError(error) && error.code === 'CATCH_ARTIFACT_NOT_FOUND'
+    )) {
+      throw error
+    }
+  }
+
+  return buildImmutableSnapshot(catchRecord, {
+    submissionNumber,
+    submittedAt: trustedNowIso(),
+    submittedBy: ownerUserId
+  })
+}
+
+/**
+ * Resolves the idempotency scope for this submission attempt (first submission or resubmission share
+ * the same scope split as the history event type) and starts/replays its claim. Extracted from the main
+ * orchestration function to keep its own cognitive complexity within the approved bound.
+ *
+ * @returns {Promise<{ idempotency: object|null, replayResponse: object|null }>}
+ */
+async function checkIdempotencyReplay({
+  db,
+  ownerUserId,
+  catchRecordId,
+  idempotencyKey,
+  isResubmission,
+  expectedVersion
+}) {
+  if (!idempotencyKey) {
+    return { idempotency: null, replayResponse: null }
+  }
+
+  const idempotency = await startIdempotencyClaim({
+    db,
+    ownerUserId,
+    catchRecordId,
+    idempotencyKey,
+    operationScope: isResubmission
+      ? IDEMPOTENCY_OPERATION_SCOPES.RESUBMISSION
+      : IDEMPOTENCY_OPERATION_SCOPES.SUBMISSION,
+    expectedVersion
+  })
+
+  if (idempotency.claim.outcome !== IDEMPOTENCY_CLAIM_OUTCOMES.REPLAY) {
+    return { idempotency, replayResponse: null }
+  }
+
+  const existing = await findCatchRecordByIdForOwner(db, {
+    id: catchRecordId,
+    ownerUserId
+  })
+
+  return {
+    idempotency,
+    replayResponse: existing ? buildSubmissionResponse(existing) : null
+  }
+}
+
+/**
+ * Resolves (fresh or recovered) the immutable snapshot and commits both submission artifacts. Extracted
+ * from the main orchestration function to keep its own cognitive complexity and length within the
+ * approved bounds.
+ *
+ * @returns {Promise<{ snapshot: object, artifactMetadata: ReadonlyArray<object> }>}
+ */
+async function buildAndStoreSubmissionArtifacts({
+  catchArtifactStore,
+  catchRecord,
+  catchRecordId,
+  submissionNumber,
+  ownerUserId,
+  maxPdfRenderedItems
+}) {
+  const snapshot = await resolveSubmissionSnapshot({
+    catchArtifactStore,
+    catchRecord,
+    catchRecordId,
+    submissionNumber,
+    ownerUserId
+  })
+
+  const jsonBody = Buffer.from(JSON.stringify(snapshot, null, 2), 'utf8')
+  const { body: pdfBody } = await generateSubmissionReceiptPdf(snapshot, {
+    maxRenderedItems: maxPdfRenderedItems
+  })
+
+  const artifactMetadata = await storeSubmissionArtifacts(catchArtifactStore, {
+    catchRecordId,
+    submissionNumber,
+    jsonBody,
+    pdfBody
+  })
+
+  return { snapshot, artifactMetadata }
+}
+
+/**
+ * Validates lifecycle eligibility and complete-validation readiness together, exactly in that order (a
+ * record not yet eligible to submit should never pay the cost of reference-data revalidation). Extracted
+ * from the main orchestration function to keep its own length within the approved bound.
+ *
+ * @throws {import('#/common/helpers/errors/application-error.js').ApplicationError}
+ *   `SUBMISSION_INELIGIBLE` or an `ARTIFACT_OPERATION_FAILURE`-adjacent validation failure.
+ */
+async function assertSubmissionEligible({
+  catchRecord,
+  isResubmission,
+  referenceDataClient,
+  authenticationContext,
+  correlationId
+}) {
+  if (!canSubmitFirstTime(catchRecord).valid && !isResubmission) {
+    throw submissionIneligibleError()
+  }
+
+  const validationResult = await validateSubmissionReadiness(catchRecord, {
+    referenceDataClient,
+    authenticationContext,
+    correlationId
+  })
+
+  if (!validationResult.valid) {
+    throw submissionValidationError(validationResult.issues)
+  }
+}
+
+/**
+ * Commits the atomic submission update and appends the matching history event. Extracted from the main
+ * orchestration function to keep its own length within the approved bound.
+ *
+ * @returns {Promise<import('../domain/canonical-catch-record.js').CatchRecord>} The updated record.
+ * @throws {import('#/common/helpers/errors/application-error.js').ApplicationError}
+ */
+async function commitSubmission({
+  db,
+  catchRecord,
+  catchRecordId,
+  ownerUserId,
+  expectedVersion,
+  submissionNumber,
+  snapshot,
+  artifactMetadata,
+  isResubmission
+}) {
+  const updated = await applySubmission(db, {
+    id: catchRecordId,
+    ownerUserId,
+    expectedVersion,
+    submissionNumber,
+    artifacts: [...catchRecord.artifacts, ...artifactMetadata],
+    submittedAt: snapshot.submittedAt,
+    submittedBy: snapshot.submittedBy,
+    updatedAt: snapshot.submittedAt,
+    updatedBy: snapshot.submittedBy
+  })
+
+  if (!updated) {
+    throw catchRecordNotFoundError()
+  }
+
+  await appendCatchHistoryEvent(db, {
+    catchRecordId,
+    ownerUserId,
+    eventType: isResubmission
+      ? CATCH_HISTORY_EVENT_TYPES.RESUBMITTED
+      : CATCH_HISTORY_EVENT_TYPES.SUBMITTED,
+    timestamp: snapshot.submittedAt,
+    actorUserId: ownerUserId,
+    metadata: { submissionNumber }
+  })
+
+  return updated
+}
+
+/**
+ * Loads the target record and resolves idempotency replay together — the two concerns that must run,
+ * in this order, before any eligibility or artifact work begins. Extracted from the main orchestration
+ * function to keep its own length within the approved bound.
+ *
+ * @returns {Promise<{ catchRecord: object, isResubmission: boolean, idempotency: object|null,
+ *   replayResponse: object|null }>}
+ * @throws {import('#/common/helpers/errors/application-error.js').ApplicationError}
+ *   `CATCH_RECORD_NOT_FOUND`.
+ */
+async function loadSubmissionContext({
+  db,
+  ownerUserId,
+  catchRecordId,
+  idempotencyKey,
+  expectedVersion
+}) {
+  const catchRecord = await findCatchRecordByIdForOwner(db, {
+    id: catchRecordId,
+    ownerUserId
+  })
+
+  if (!catchRecord) {
+    throw catchRecordNotFoundError()
+  }
+
+  const isResubmission = canResubmit(catchRecord).valid
+
+  // Idempotency replay is checked before lifecycle eligibility: a retried request whose first attempt
+  // already succeeded will find the record no longer `DRAFT`, which would otherwise fail the lifecycle
+  // check before ever reaching the stored replay result.
+  const { idempotency, replayResponse } = await checkIdempotencyReplay({
+    db,
+    ownerUserId,
+    catchRecordId,
+    idempotencyKey,
+    isResubmission,
+    expectedVersion
+  })
+
+  return { catchRecord, isResubmission, idempotency, replayResponse }
+}
+
+/**
+ * Shapes the approved response and, when this attempt carried an `Idempotency-Key`, records the claim's
+ * completed result for future replay. Extracted from the main orchestration function to keep its own
+ * length within the approved bound.
+ *
+ * @returns {Promise<object>} The approved submission response.
+ */
+async function finaliseSubmission({
+  db,
+  updated,
+  idempotencyKey,
+  idempotency,
+  isResubmission,
+  catchRecordId,
+  ownerUserId
+}) {
+  const response = buildSubmissionResponse(updated)
+
+  if (idempotencyKey) {
+    await completeIdempotencyClaim(db, {
+      ownerUserId,
+      operationScope: isResubmission
+        ? IDEMPOTENCY_OPERATION_SCOPES.RESUBMISSION
+        : IDEMPOTENCY_OPERATION_SCOPES.SUBMISSION,
+      idempotencyKey,
+      resourceId: catchRecordId,
+      fingerprint: idempotency.fingerprint,
+      result: { id: catchRecordId },
+      allowedResultFields: ALLOWED_IDEMPOTENCY_RESULT_FIELDS
+    })
+  }
+
+  return response
+}
+
+/**
+ * @param {Object} input
+ * @param {import('mongodb').Db} input.db
+ * @param {object} input.referenceDataClient the Step 15 Reference Data Service client
+ * @param {object} input.catchArtifactStore the Step 33 `CatchArtifact` storage adapter
+ * @param {{ userId: string, scopes: ReadonlyArray<string> }} input.authenticationContext
+ * @param {string} input.catchRecordId
+ * @param {number} input.expectedVersion
+ * @param {string|undefined} input.idempotencyKey optional `Idempotency-Key` header value
+ * @param {number} [input.maxPdfRenderedItems]
+ * @param {string} [input.correlationId]
+ * @returns {Promise<object>} The approved submission response.
+ */
+export async function submitCatchRecord({
+  db,
+  referenceDataClient,
+  catchArtifactStore,
+  authenticationContext,
+  catchRecordId,
+  expectedVersion,
+  idempotencyKey,
+  maxPdfRenderedItems,
+  correlationId
+}) {
+  const ownerUserId = authenticationContext?.userId
+
+  const { catchRecord, isResubmission, idempotency, replayResponse } =
+    await loadSubmissionContext({
+      db,
+      ownerUserId,
+      catchRecordId,
+      idempotencyKey,
+      expectedVersion
+    })
+
+  if (replayResponse) {
+    return replayResponse
+  }
+
+  await assertSubmissionEligible({
+    catchRecord,
+    isResubmission,
+    referenceDataClient,
+    authenticationContext,
+    correlationId
+  })
+
+  const submissionNumber = calculateNextSubmissionNumber(
+    catchRecord.numberOfSubmissions
+  )
+
+  const { snapshot, artifactMetadata } = await buildAndStoreSubmissionArtifacts(
+    {
+      catchArtifactStore,
+      catchRecord,
+      catchRecordId,
+      submissionNumber,
+      ownerUserId,
+      maxPdfRenderedItems
+    }
+  )
+
+  const updated = await commitSubmission({
+    db,
+    catchRecord,
+    catchRecordId,
+    ownerUserId,
+    expectedVersion,
+    submissionNumber,
+    snapshot,
+    artifactMetadata,
+    isResubmission
+  })
+
+  return finaliseSubmission({
+    db,
+    updated,
+    idempotencyKey,
+    idempotency,
+    isResubmission,
+    catchRecordId,
+    ownerUserId
+  })
+}

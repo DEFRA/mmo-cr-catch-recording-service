@@ -19,6 +19,7 @@ import {
   appendCatchHistoryEvent,
   CATCH_HISTORY_EVENT_TYPES
 } from '#/catch-recording/persistence/catch-history-persistence.js'
+import { isAmendedDraft } from '#/catch-recording/domain/lifecycle-consistency.js'
 import { resolveGearsSection } from './gears/resolve-gears-section.js'
 import { reconcileGears } from './gears/reconcile-gears.js'
 import { resolveSpeciesNotLandedSection } from './resolve-species-not-landed.js'
@@ -314,10 +315,18 @@ export async function saveCatchRecordSection({
     throw catchRecordNotFoundError()
   }
 
+  // Step 38: an amendment save (the patched record is now an amended draft - `DRAFT` with prior
+  // submissions) is recorded as a distinct event type from an ordinary never-submitted-draft section
+  // save. Checking the *updated* document (not a separate pre-read) is sufficient: `applySectionUpdate`
+  // never touches `numberOfSubmissions`, so its before/after value is identical.
+  const eventType = isAmendedDraft(updated)
+    ? CATCH_HISTORY_EVENT_TYPES.AMENDMENT_SECTION_SAVED
+    : CATCH_HISTORY_EVENT_TYPES.SECTION_SAVED
+
   await appendCatchHistoryEvent(db, {
     catchRecordId,
     ownerUserId,
-    eventType: CATCH_HISTORY_EVENT_TYPES.SECTION_SAVED,
+    eventType,
     timestamp: now,
     actorUserId: ownerUserId,
     metadata: { section }
