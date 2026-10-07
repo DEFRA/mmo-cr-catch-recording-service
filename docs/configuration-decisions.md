@@ -41,18 +41,18 @@ Each is resolved by its own later step, per
 `design/architecture/catch-recording-service-design.md` §23 (both higher-precedence than this step's
 broader framing).
 
-| Deferred item                                                                                                                       | Resolved before                                                                                          | Notes                                                                                                                                                                                                                                                                                                                            |
-| ----------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Catch Record / history / idempotency-record collection names                                                                        | Phase 3 (`CatchPersistence`, Steps 09–12)                                                                | Repository convention keeps collection names as source-level constants (e.g. `'mongo-locks'`, `'example-data'` in `src/plugins/mongodb.js`), not convict configuration. They are introduced by the module that owns them, not Step 04, and only `CatchPersistence` owns Mongo collection access.                                 |
-| Idempotency record retention                                                                                                        | Step 12                                                                                                  | No retention period is approved anywhere.                                                                                                                                                                                                                                                                                        |
-| Business timezone                                                                                                                   | Step 17                                                                                                  | Needed for friendly-reference generation; not needed by anything implemented in Phase 1.                                                                                                                                                                                                                                         |
-| ~~Reference Data Service base URL, timeout, retry, service authentication~~                                                         | Resolved — see [Phase 4 decisions](#phase-4-decisions-steps-1316-trust-authorisation-and-reference-data) | No longer deferred; resolved before Step 15 implementation.                                                                                                                                                                                                                                                                      |
-| S3-compatible artifact storage (endpoint, region, bucket, credentials, path-style access)                                           | Step 33 (and the artifact-implementation decisions before it)                                            | Local `floci` infrastructure exists in `compose.yml` (region `eu-west-2`, dummy local credentials), but "do not assume local emulator credentials or endpoint behaviour applies to deployed environments" — no approved deployed bucket/region/credential strategy exists yet, and no `CatchArtifact` code exists to consume it. |
-| PDF safety limits (max document size, max rendered text length, rendering timeout)                                                  | Step 33                                                                                                  | No numeric value approved; no `PDFGenerator` code exists yet.                                                                                                                                                                                                                                                                    |
-| HTTP payload limits                                                                                                                 | Deferred — see below                                                                                     | See "Collection and payload limits" below.                                                                                                                                                                                                                                                                                       |
-| Domain collection limits (gears per Catch Record, species per gear, catch details per species-gear, validation-detail output limit) | Phase 2 domain validation (from Step 07) / Phase 5 section saves                                         | No numeric value approved anywhere, including the canonical Catch Record object document.                                                                                                                                                                                                                                        |
-| Paging limits (default/max page size)                                                                                               | The read-API phase that implements listing                                                               | No numeric value approved.                                                                                                                                                                                                                                                                                                       |
-| ~~Trusted authentication settings (user-ID/role/scope claim names, issuer/audience, trusted headers)~~                              | Resolved — see [Phase 4 decisions](#phase-4-decisions-steps-1316-trust-authorisation-and-reference-data) | No longer deferred; resolved before Step 13 implementation. No gateway-injected claims are used — identity is established by validating the caller's bearer token against the Authentication Service directly.                                                                                                                   |
+| Deferred item                                                                                                                       | Resolved before                                                                                          | Notes                                                                                                                                                                                                                                                                                            |
+| ----------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Catch Record / history / idempotency-record collection names                                                                        | Phase 3 (`CatchPersistence`, Steps 09–12)                                                                | Repository convention keeps collection names as source-level constants (e.g. `'mongo-locks'`, `'example-data'` in `src/plugins/mongodb.js`), not convict configuration. They are introduced by the module that owns them, not Step 04, and only `CatchPersistence` owns Mongo collection access. |
+| Idempotency record retention                                                                                                        | Step 12                                                                                                  | No retention period is approved anywhere.                                                                                                                                                                                                                                                        |
+| Business timezone                                                                                                                   | Step 17                                                                                                  | Needed for friendly-reference generation; not needed by anything implemented in Phase 1.                                                                                                                                                                                                         |
+| ~~Reference Data Service base URL, timeout, retry, service authentication~~                                                         | Resolved — see [Phase 4 decisions](#phase-4-decisions-steps-1316-trust-authorisation-and-reference-data) | No longer deferred; resolved before Step 15 implementation.                                                                                                                                                                                                                                      |
+| ~~S3-compatible artifact storage (endpoint, region, bucket, credentials, path-style access)~~                                       | Resolved — see "Phase 8 decisions" → "Step 33" below                                                     | No longer deferred; resolved before Step 33 implementation.                                                                                                                                                                                                                                      |
+| ~~PDF safety limits (max document size, max rendered text length, rendering timeout)~~                                              | Resolved — see "Phase 8 decisions" → "Step 33" below                                                     | No longer deferred; a pragmatic rendered-item bound (`maxPdfRenderedItems`) was approved — no document-size/rendering-timeout limit was found necessary (pdfkit generation is synchronous, bounded, and in-process).                                                                             |
+| HTTP payload limits                                                                                                                 | Deferred — see below                                                                                     | See "Collection and payload limits" below.                                                                                                                                                                                                                                                       |
+| Domain collection limits (gears per Catch Record, species per gear, catch details per species-gear, validation-detail output limit) | Phase 2 domain validation (from Step 07) / Phase 5 section saves                                         | No numeric value approved anywhere, including the canonical Catch Record object document.                                                                                                                                                                                                        |
+| Paging limits (default/max page size)                                                                                               | The read-API phase that implements listing                                                               | No numeric value approved.                                                                                                                                                                                                                                                                       |
+| ~~Trusted authentication settings (user-ID/role/scope claim names, issuer/audience, trusted headers)~~                              | Resolved — see [Phase 4 decisions](#phase-4-decisions-steps-1316-trust-authorisation-and-reference-data) | No longer deferred; resolved before Step 13 implementation. No gateway-injected claims are used — identity is established by validating the caller's bearer token against the Authentication Service directly.                                                                                   |
 
 ## Collection and payload limits — the one decision flagged as blocking Step 04 itself
 
@@ -332,6 +332,158 @@ numberOfSubmissions, events: [{ id, eventType, timestamp, actor, section?, submi
   are exposed as-is (no internal/public translation table — mirrors how persisted lifecycle `status` is
   already exposed directly). The trusted `actorUserId` is exposed directly as `actor` (a single-actor-
   per-record system; no pseudonymisation or categorisation is invented).
+
+## Phase 8 decisions (Steps 32-38): submission, artifacts, completion, and amendment
+
+> Recorded ahead of/during implementation. Most Phase 8 contract decisions were already evidenced by
+> infrastructure built ahead of this phase (the lifecycle-transition domain policies, idempotency
+> operation scopes, history event types, and resource-authorisation policies all already existed with
+> Phase 8 in mind) — only genuinely open items required a fresh decision.
+
+### Step 32: complete-validation
+
+- **No optional `POST /v1/catch-records/{catchRecordId}/validation` endpoint.** The approved condition
+  for adding it ("an authoritative UI requirement confirms a need to validate without submitting") has no
+  supporting evidence anywhere in the repository — the same absence-of-evidence reasoning already applied
+  to deferring `submissionEligible` composition in Step 26. The reusable `validateSubmissionReadiness`
+  capability is implemented in full and ready for Steps 34/38 to call; it is simply not independently
+  exposed over HTTP.
+- **Gear completeness is a mandatory dimension of complete-validation**, reusing Step 26's `isGearComplete`
+  bar unchanged (not re-implemented) — an in-progress gear that is valid for an ordinary section save
+  must still fail complete-validation.
+- **Landing intention / retained-catch consistency**: the step prompt's original language is superseded
+  by the Step 27 redesign (`docs/adr/0001-flat-species-weight-entries-and-species-not-landed.md`) — there
+  is no landing-intention concept in the canonical contract. Complete-validation instead revalidates every
+  `gears[].speciesCaught[]` and root-level `speciesNotLanded[]` entry's reference validity; no
+  landing/retained-catch cross-check is invented.
+- **Reference-data revalidation scope**: vessel, departure/return ports, each gear, each gear's
+  statistical area, and every species entry (`speciesCaught` and `speciesNotLanded`) are revalidated for
+  existence and current active-selection. Gear-characteristic, gear↔area, and gear↔species _relationship_
+  revalidation is not attempted — the same recorded Step 16 gap (neither schema carries a gear-reference
+  field).
+
+### Step 33: immutable JSON and PDF artifact capabilities
+
+No approved value existed anywhere for any of the following (`docs/configuration-decisions.md` already
+flagged all of them as deferred to this step). Resolved pragmatically for a greenfield service with no
+production traffic yet, documented here as decisions rather than invented silently:
+
+- **Storage SDK**: `@aws-sdk/client-s3` — consistent with the pre-existing (previously unused)
+  `@aws-sdk/credential-providers` dependency already in `package.json`, and the only AWS-maintained S3
+  client compatible with the local `floci` emulator already provisioned in `compose.yml`.
+- **PDF library**: `pdfkit` — a pure-JS, no-native-binary, no-browser-automation dependency, consistent
+  with this repository's existing dependency-minimalism (no Puppeteer/Chromium or similar heavyweight
+  rendering engine is introduced).
+- **Deterministic key structure**:
+  `catch-records/{catchRecordId}/submissions/{submissionNumber}/{snapshot.json|receipt.pdf}` — server
+  generated from a validated `(catchRecordId, submissionNumber, type)` triple only.
+- **Immutability mechanism**: a pre-write `HeadObject` existence check plus checksum comparison (see
+  `docs/catch-recording-artifacts.md`), explicitly documented as a local-development/early-production
+  substitute for true conditional-write/object-lock immutability — not claimed as distributed-transaction
+  safety.
+- **Artifact integrity metadata**: a SHA-256 hex checksum (Node's built-in `crypto`, the same primitive
+  `idempotency-fingerprint.js` already uses) plus content type and content length — never the artifact
+  body itself.
+- **PDF accessibility**: best-effort only (document title/language metadata, native selectable/searchable
+  text, logical reading order). Full tagged-PDF/PDF-UA structure-tree conformance is explicitly **not**
+  implemented or claimed, since no approved conformance target exists anywhere in the repository and
+  `pdfkit` cannot produce a genuine structure tree without one being deliberately built.
+- **Artifact retention**: no retention/deletion/archival behaviour is implemented — no approved
+  requirement exists for any of it.
+- **Credentials**: none configured by this service directly — the AWS SDK's own default credential
+  provider chain is used unchanged (env vars locally via `compose/aws.env`, an IAM task role in deployed
+  CDP environments).
+
+### Step 34: idempotent submission
+
+- **Idempotency-Key is optional**, not mandatory — extends the Step 18 draft-creation precedent
+  unchanged (applied only when the caller supplies one).
+- **Idempotency replay is checked before lifecycle eligibility** (not after) — a retried request whose
+  first attempt already succeeded would otherwise fail the lifecycle check (record no longer `DRAFT`)
+  before ever reaching the stored replay result.
+- **One atomic persistence primitive (`applySubmission`) serves both first submission and resubmission**
+  — both source states are persisted `DRAFT`, so the same predicate (`status: DRAFT` alongside
+  id/owner/version) safely gates both, mirroring `applyCompleteReplacement`'s established pattern. The
+  caller (not the primitive) decides which lifecycle policy accepted the request and which history event
+  type to append.
+- **Deterministic recovery is implemented via a check-existing-JSON-artifact-first strategy** (see
+  `docs/catch-recording-submission.md`) - this is the one piece of behaviour genuinely new to this step,
+  since Step 33's immutability mechanism alone does not explain how a _retried_ request produces
+  byte-identical content to reuse. No durable submission-operation record is introduced — evidence does
+  not yet show the deterministic mechanism is insufficient.
+- **PDF determinism for recovery**: `PDFGenerator` fixes the embedded PDF `CreationDate` metadata field
+  from the snapshot's own `submittedAt` (never wall-clock `new Date()`), so regenerating a PDF from an
+  identical (possibly recovered) snapshot produces byte-identical output — required for the recovery
+  path's artifact-reuse check to succeed rather than raising a false integrity conflict.
+- **Submission response** extends the existing `buildStandardSaveResponse` shape with `submittedAt`,
+  `submittedBy`, and the complete `artifacts` array — no new, incompatible response shape.
+- **Artifact-key safety guard relaxed from strict-UUID to a general safe-bounded-identifier pattern**
+  (`^[0-9a-zA-Z_-]{1,100}$`): no other boundary in this service (Joi route-parameter validation, Mongo
+  `_id`) actually requires `catchRecordId` to be UUID-shaped specifically — only that it be safe to place
+  inside an object-storage key (no path separators, no dot-segments). Assuming UUID shape was an
+  unevidenced, unnecessarily narrow constraint.
+
+### Step 35: submission artifact listing and retrieval
+
+- **Public artifact-type values are `json`/`pdf`** (not the persisted `JSON_SNAPSHOT`/`PDF_RECEIPT`
+  values) — a closed, explicit, case-sensitive mapping (`artifact-keys.js`), consistent with REST
+  convention and avoiding exposure of internal persisted enum values over HTTP.
+- **Listing response fields**: `submissionNumber` plus, per artifact, `type`/`contentType`/
+  `contentLength`/`checksum` — no presigned URL or `_links` field (no evidence anywhere approves backend-
+  generated links).
+- **Buffered, not streamed, retrieval** — no evidence anywhere in the repository suggests artifact sizes
+  large enough to need streaming (JSON snapshots and single-page PDF receipts are inherently small).
+- **`Content-Disposition: attachment`** for both JSON and PDF — treated uniformly as downloadable
+  evidence rather than browser-rendered content, avoiding inconsistent per-browser inline-rendering
+  behaviour for JSON.
+- **Filename convention**: `{catchRecordReference}-submission-{submissionNumber}.{json|pdf}`, generated
+  entirely server-side.
+
+### Step 36: restricted completion
+
+- **Completion permission**: already resolved before Phase 8 — the exact `catch-recording.complete`
+  scope (`completion-policy.js`, confirmed in `docs/catch-recording-authorisation.md`'s Phase 4
+  decisions). No new permission name is invented.
+- **No completion evidence or request payload** — no approved requirement exists for either; only the
+  existing lifecycle precondition (`SUBMITTED`) gates the transition.
+- **Idempotency-Key is optional**, scoped by the completing administrator's own identity (not the
+  record's owner, since completion has no owner concept) — extends the same optional-header pattern used
+  throughout Phase 8.
+- **A new, not-owner-scoped persistence primitive (`applyCompletion`) and read (`findCatchRecordById`)**
+  were introduced specifically for this step — every other `CatchPersistence` primitive is owner-scoped,
+  but completion is deliberately exempt per the approved Phase 4 decision that completion is "purely
+  permission-gated".
+- **Response** extends `buildStandardSaveResponse` with `completedAt`/`completedBy` — no new,
+  incompatible shape.
+
+### Step 37: edit-start amendment reason
+
+- **No amendment-reason request field.** Zero evidence of this field exists anywhere in the canonical
+  contract, the domain lifecycle policies (`buildEditStartFacts` takes no `reason` parameter), or any
+  approved document. Edit-start is implemented as a no-request-body `POST`, consistent with "do not invent
+  a reason field or validation limits".
+- **Eligible source states**: both `SUBMITTED` and `COMPLETE` (confirmed by the pre-existing
+  `canStartEdit` domain policy, built ahead of this step) — an already-`DRAFT` record is not eligible.
+  Both share identical authorisation/evidence/history treatment; no divergent behaviour between the two
+  source states is approved anywhere.
+- **Idempotency-Key is optional**, owner-scoped — the same pattern as submission.
+- **Response reuses the unmodified standard save response** — `hasUnsubmittedChanges` and
+  `numberOfSubmissions` are already present via its existing `progress` field, so no response-shape
+  extension was needed.
+
+### Step 38: amendment saves and resubmission
+
+- **No new endpoints** — amendment saves reuse the existing generic section `PATCH`; resubmission reuses
+  the existing `POST .../submission` (Step 34's `submitCatchRecord` already handled resubmission; no
+  change was needed there).
+- **`applySectionUpdate` gains a `status: DRAFT` predicate condition** (previously absent) — discovered
+  during this step that nothing prevented a section `PATCH` from applying directly to a
+  `SUBMITTED`/`COMPLETE` record, bypassing edit-start. This is a scoped, tightly-coupled fix: Step 38's
+  own "preservation of DRAFT" requirement cannot hold unless `PATCH` actually enforces it.
+- **Amendment-save history event type is derived from the already-returned updated document** (an
+  amended draft check on the post-update record), not a separate pre-read — `applySectionUpdate` never
+  touches `numberOfSubmissions`, so this is equivalent and avoids an extra database read per section
+  save.
 
 ## Security and privacy
 

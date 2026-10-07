@@ -114,6 +114,29 @@ This is a structural safety check only — not a re-run of Step 07 business vali
   existing `src/plugins/mongodb.js` `createIndexes(db)` function (one integration point, no second Mongo
   client).
 
+### Phase 8 additions (Steps 34/36/37/38)
+
+- **`applySubmission(db, { id, ownerUserId, expectedVersion, submissionNumber, artifacts, submittedAt,
+submittedBy, updatedAt, updatedBy })`** — the one atomic submission-commitment primitive, reused
+  identically by first submission and resubmission (both source states are persisted `DRAFT`). Predicate:
+  `{ _id, ownerUserId, status: DRAFT, version }`. On no match: not-found (`null`), ineligible
+  (`CATCH_RECORD_SUBMISSION_INELIGIBLE`), or `VERSION_CONFLICT`.
+- **`applyCompletion(db, { id, expectedVersion, completedAt, completedBy })`** — Step 36's restricted
+  completion primitive. **Not owner-scoped** (completion is purely permission-gated — enforced by the
+  controller's `decideCompletionAccess` before this is ever called). Predicate: `{ _id, status:
+SUBMITTED, version }`.
+- **`findCatchRecordById(db, { id })`** — trusted-internal, **not** owner-scoped. Reserved exclusively
+  for Step 36's completion read. Must never be exposed directly to an HTTP route or used by any
+  ownership-scoped operation.
+- **`applyEditStart(db, { id, ownerUserId, expectedVersion, updatedAt, updatedBy })`** — Step 37's
+  edit-start primitive. Predicate: `{ _id, ownerUserId, status: { $in: [SUBMITTED, COMPLETE] }, version
+}`. `$set`s only `status: DRAFT`, `hasUnsubmittedChanges: true`, and audit metadata — every other field
+  (`numberOfSubmissions`, `artifacts`, prior submission/completion metadata) survives untouched.
+- **`applySectionUpdate` now embeds `status: DRAFT`** in its predicate (Step 38) — previously absent,
+  which meant nothing prevented a section save from applying directly to a `SUBMITTED`/`COMPLETE` record.
+  A `SUBMITTED`/`COMPLETE` record must now return to `DRAFT` via edit-start first
+  (`CATCH_RECORD_SECTION_UPDATE_INELIGIBLE` otherwise).
+
 ## Required indexes
 
 | Index                                       | Justification                                                                                                                                                       |

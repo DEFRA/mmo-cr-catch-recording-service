@@ -9,6 +9,7 @@ import { mongoDb } from '#/plugins/mongodb.js'
 import { errorMapping } from '#/plugins/error-mapping.js'
 import { authenticationPlugin } from '#/catch-recording/controller/authentication-plugin.js'
 import { referenceDataPlugin } from '#/catch-recording/controller/reference-data-plugin.js'
+import { catchArtifactPlugin } from '#/catch-recording/controller/catch-artifact-plugin.js'
 import { failAction } from '#/common/helpers/fail-action.js'
 import { pulse } from '#/plugins/pulse.js'
 import { requestTracing } from '#/plugins/request-tracing.js'
@@ -52,6 +53,8 @@ export async function createServer() {
   //                        (Step 13); dormant until a route opts in via `auth: 'authentication-service'`
   // referenceDataPlugin  - decorates `request.referenceDataClient` with the Step 15 Reference Data
   //                        Service client (built once from config)
+  // catchArtifactPlugin  - decorates `request.catchArtifactStore` with the Step 33 S3-compatible
+  //                        CatchArtifact storage adapter (built once from config)
   // router              - routes used in the app
   await server.register([
     requestLogger,
@@ -77,6 +80,10 @@ export async function createServer() {
         ...config.get('referenceData'),
         tracingHeader: config.get('tracing.header')
       }
+    },
+    {
+      plugin: catchArtifactPlugin,
+      options: config.get('catchArtifacts')
     },
     router
   ])

@@ -12,8 +12,14 @@ import { listCatchRecords } from '#/catch-recording/controller/list-catch-record
 import { retrieveCatchRecord } from '#/catch-recording/controller/retrieve-catch-record.js'
 import { replaceCatchRecord } from '#/catch-recording/controller/replace-catch-record.js'
 import { getCatchRecordHistory } from '#/catch-recording/controller/catch-record-history.js'
+import { submitCatchRecord } from '#/catch-recording/controller/submit-catch-record.js'
+import { listSubmissionArtifacts } from '#/catch-recording/controller/list-submission-artifacts.js'
+import { retrieveSubmissionArtifact } from '#/catch-recording/controller/retrieve-submission-artifact.js'
+import { completeCatchRecord } from '#/catch-recording/controller/complete-catch-record.js'
+import { startCatchRecordEdit } from '#/catch-recording/controller/start-catch-record-edit.js'
 import { MAX_IDEMPOTENCY_KEY_LENGTH } from '#/catch-recording/persistence/idempotency-key.js'
 import { PERSISTED_STATUSES } from '#/catch-recording/domain/lifecycle-status.js'
+import { PUBLIC_ARTIFACT_TYPES } from '#/catch-recording/artifact/artifact-keys.js'
 
 const AUTH_STRATEGY = 'authentication-service'
 
@@ -192,6 +198,102 @@ async function saveCatchRecordSectionHandler(request, h) {
   return h.response(response).code(HTTP_STATUS_OK)
 }
 
+// Step 34/38: the submission/resubmission `Idempotency-Key` header is optional, mirroring the Step 18
+// first-draft-creation precedent (`createDraftHeadersSchema`) - applied only when the caller supplies
+// one, never required for symmetry alone.
+const submissionHeadersSchema = Joi.object({
+  'if-match': Joi.string()
+    .trim()
+    .pattern(/^[1-9]\d*$/)
+    .required(),
+  'idempotency-key': Joi.string()
+    .trim()
+    .min(1)
+    .max(MAX_IDEMPOTENCY_KEY_LENGTH)
+    .optional()
+}).unknown(true)
+
+async function submitCatchRecordHandler(request, h) {
+  const response = await submitCatchRecord({
+    db: request.db,
+    referenceDataClient: request.referenceDataClient,
+    catchArtifactStore: request.catchArtifactStore,
+    authenticationContext: request.auth.credentials,
+    catchRecordId: request.params.catchRecordId,
+    expectedVersion: Number(request.headers['if-match']),
+    idempotencyKey: request.headers['idempotency-key'],
+    maxPdfRenderedItems: config.get('catchArtifacts.maxPdfRenderedItems'),
+    correlationId: getTraceId()
+  })
+
+  return h.response(response).code(HTTP_STATUS_OK)
+}
+
+async function listSubmissionArtifactsHandler(request, h) {
+  const response = await listSubmissionArtifacts({
+    db: request.db,
+    authenticationContext: request.auth.credentials,
+    catchRecordId: request.params.catchRecordId
+  })
+
+  return h.response(response).code(HTTP_STATUS_OK)
+}
+
+// Step 35: a positive-integer submission number and an explicit, closed artifact-type allow-list - no
+// case/alias behaviour, no coercion beyond Joi's standard numeric-string conversion.
+const submissionArtifactParamsSchema = Joi.object({
+  catchRecordId: Joi.string().trim().min(1).required(),
+  submissionNumber: Joi.number().integer().min(1).max(1000).required(),
+  artifactType: Joi.string()
+    .valid(...Object.keys(PUBLIC_ARTIFACT_TYPES))
+    .required()
+})
+
+async function retrieveSubmissionArtifactHandler(request, h) {
+  const { body, contentType, filename } = await retrieveSubmissionArtifact({
+    db: request.db,
+    catchArtifactStore: request.catchArtifactStore,
+    authenticationContext: request.auth.credentials,
+    catchRecordId: request.params.catchRecordId,
+    submissionNumber: request.params.submissionNumber,
+    artifactType: request.params.artifactType
+  })
+
+  return h
+    .response(body)
+    .type(contentType)
+    .header('Content-Disposition', `attachment; filename="${filename}"`)
+    .code(HTTP_STATUS_OK)
+}
+
+// Step 36: reuses the identical expected-version + optional-idempotency-key header shape as
+// submission - no new header contract is introduced.
+async function completeCatchRecordHandler(request, h) {
+  const response = await completeCatchRecord({
+    db: request.db,
+    authenticationContext: request.auth.credentials,
+    catchRecordId: request.params.catchRecordId,
+    expectedVersion: Number(request.headers['if-match']),
+    idempotencyKey: request.headers['idempotency-key']
+  })
+
+  return h.response(response).code(HTTP_STATUS_OK)
+}
+
+// Step 37: reuses the identical expected-version + optional-idempotency-key header shape as
+// submission/completion - no new header contract is introduced.
+async function startCatchRecordEditHandler(request, h) {
+  const response = await startCatchRecordEdit({
+    db: request.db,
+    authenticationContext: request.auth.credentials,
+    catchRecordId: request.params.catchRecordId,
+    expectedVersion: Number(request.headers['if-match']),
+    idempotencyKey: request.headers['idempotency-key']
+  })
+
+  return h.response(response).code(HTTP_STATUS_OK)
+}
+
 /**
  * Step 17/18/19/20/21/28: `GET`/`POST`/`DELETE`/`PATCH /v1/catch-records[/{catchRecordId}]`.
  *
@@ -284,5 +386,63 @@ export const catchRecords = [
       }
     },
     handler: saveCatchRecordSectionHandler
+  },
+  {
+    method: 'POST',
+    path: `${CATCH_RECORD_PATH}/submission`,
+    options: {
+      auth: AUTH_STRATEGY,
+      validate: {
+        params: catchRecordIdParamsSchema,
+        headers: submissionHeadersSchema
+      }
+    },
+    handler: submitCatchRecordHandler
+  },
+  {
+    method: 'GET',
+    path: `${CATCH_RECORD_PATH}/submissions`,
+    options: {
+      auth: AUTH_STRATEGY,
+      validate: {
+        params: catchRecordIdParamsSchema
+      }
+    },
+    handler: listSubmissionArtifactsHandler
+  },
+  {
+    method: 'GET',
+    path: `${CATCH_RECORD_PATH}/submissions/{submissionNumber}/{artifactType}`,
+    options: {
+      auth: AUTH_STRATEGY,
+      validate: {
+        params: submissionArtifactParamsSchema
+      }
+    },
+    handler: retrieveSubmissionArtifactHandler
+  },
+  {
+    method: 'POST',
+    path: `${CATCH_RECORD_PATH}/completion`,
+    options: {
+      auth: AUTH_STRATEGY,
+      validate: {
+        params: catchRecordIdParamsSchema,
+        headers: submissionHeadersSchema
+      }
+    },
+    handler: completeCatchRecordHandler
+  },
+  {
+    method: 'POST',
+    path: `${CATCH_RECORD_PATH}/edit-start`,
+    options: {
+      auth: AUTH_STRATEGY,
+      validate: {
+        params: catchRecordIdParamsSchema,
+        headers: submissionHeadersSchema
+      }
+    },
+    handler: startCatchRecordEditHandler
   }
 ]

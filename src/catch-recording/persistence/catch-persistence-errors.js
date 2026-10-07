@@ -116,6 +116,73 @@ export function ineligibleReplacementError() {
 }
 
 /**
+ * Builds the safe, deterministic `ApplicationError` for Step 38's section-update lifecycle precondition
+ * failure: an owner-scoped Catch Record exists, but it is not (or is no longer) `DRAFT`. A
+ * `SUBMITTED`/`COMPLETE` record must first return to `DRAFT` via Step 37's edit-start before any section
+ * may be saved. Reuses the existing (Step 03) `INVALID_LIFECYCLE_TRANSITION` category - no new category
+ * is added. Never includes the record ID, owner ID, or its current status.
+ *
+ * @returns {ApplicationError}
+ */
+export function ineligibleSectionUpdateError() {
+  return new ApplicationError({
+    category: 'INVALID_LIFECYCLE_TRANSITION',
+    code: 'CATCH_RECORD_SECTION_UPDATE_INELIGIBLE',
+    message: 'Only a draft catch record may have a section updated.'
+  })
+}
+
+/**
+ * Builds the safe, deterministic `ApplicationError` for Step 34's submission/resubmission lifecycle
+ * precondition failure: an owner-scoped Catch Record exists, but it is not (or is no longer) `DRAFT`
+ * (only a `DRAFT` - whether never-submitted or amended - may be submitted; `SUBMITTED`/`COMPLETE` are
+ * not). Reuses the existing (Step 03) `INVALID_LIFECYCLE_TRANSITION` category - no new category is
+ * added. Never includes the record ID, owner ID, or its current status/submission state.
+ *
+ * @returns {ApplicationError}
+ */
+export function ineligibleSubmissionError() {
+  return new ApplicationError({
+    category: 'INVALID_LIFECYCLE_TRANSITION',
+    code: 'CATCH_RECORD_SUBMISSION_INELIGIBLE',
+    message: 'Only a draft catch record may be submitted.'
+  })
+}
+
+/**
+ * Builds the safe, deterministic `ApplicationError` for Step 36's restricted-completion precondition
+ * failure: a Catch Record exists by id, but it is not (or is no longer) `SUBMITTED` (only a `SUBMITTED`
+ * record may be completed). Reuses the existing (Step 03) `INVALID_LIFECYCLE_TRANSITION` category - no
+ * new category is added. Never includes the record ID or its current status.
+ *
+ * @returns {ApplicationError}
+ */
+export function ineligibleCompletionError() {
+  return new ApplicationError({
+    category: 'INVALID_LIFECYCLE_TRANSITION',
+    code: 'CATCH_RECORD_COMPLETION_INELIGIBLE',
+    message: 'Only a submitted catch record may be completed.'
+  })
+}
+
+/**
+ * Builds the safe, deterministic `ApplicationError` for Step 37's edit-start lifecycle precondition
+ * failure: an owner-scoped Catch Record exists, but it is not (or is no longer) `SUBMITTED` or
+ * `COMPLETE` (only those two states may return to `DRAFT` via edit-start; an already-`DRAFT` record,
+ * amended or not, is not eligible). Reuses the existing (Step 03) `INVALID_LIFECYCLE_TRANSITION`
+ * category - no new category is added. Never includes the record ID, owner ID, or its current status.
+ *
+ * @returns {ApplicationError}
+ */
+export function ineligibleEditStartError() {
+  return new ApplicationError({
+    category: 'INVALID_LIFECYCLE_TRANSITION',
+    code: 'CATCH_RECORD_EDIT_START_INELIGIBLE',
+    message: 'Only a submitted or completed catch record may start an edit.'
+  })
+}
+
+/**
  * Builds the safe, deterministic `ApplicationError` for an optimistic-concurrency conflict: an
  * owner-scoped Catch Record exists, but its stored `version` no longer matches the caller's supplied
  * expected version. Reuses the existing (Step 03) `VERSION_CONFLICT` category — no new category is

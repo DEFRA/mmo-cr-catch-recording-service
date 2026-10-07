@@ -15,16 +15,18 @@ valid for the requested operation?"_ — **Joi** (future HTTP routes) validates 
 never re-trims, re-coerces, or strips fields itself. CatchValidation is framework-neutral: no file
 imports Hapi, Boom, Joi, or MongoDB (verified by `architecture-boundary.test.js` and a manual `grep`).
 
-| File                             | Exports                                                                                               |
-| -------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `validation-result.js`           | `formatPath`, `createValidResult`, `createInvalidResult`, `combineResults` — the one result contract  |
-| `validation-codes.js`            | `VALIDATION_CODES` — the focused stable-code catalogue                                                |
-| `structural.js`                  | `validateStructure(catchRecord)`                                                                      |
-| `sections/gears.js`              | `validateGears(gears)` — duplicate detection, including a duplicate species `id` within the same gear |
-| `sections/pair-fishing.js`       | `validatePairFishing(pairFishing)` — the one approved conditional rule                                |
-| `sections/species-not-landed.js` | `validateSpeciesNotLanded(speciesNotLanded)` — root-level entry shape and duplicate-`id` detection    |
-| `sections/trip.js`               | `validateTrip(trip)`                                                                                  |
-| `catch-record.js`                | `validateCatchRecord(catchRecord)` — composes everything above                                        |
+| File                             | Exports                                                                                                                                            |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `validation-result.js`           | `formatPath`, `createValidResult`, `createInvalidResult`, `combineResults` — the one result contract                                               |
+| `validation-codes.js`            | `VALIDATION_CODES` — the focused stable-code catalogue                                                                                             |
+| `structural.js`                  | `validateStructure(catchRecord)`                                                                                                                   |
+| `sections/gears.js`              | `validateGears(gears)` — duplicate detection, including a duplicate species `id` within the same gear                                              |
+| `sections/pair-fishing.js`       | `validatePairFishing(pairFishing)` — the one approved conditional rule                                                                             |
+| `sections/species-not-landed.js` | `validateSpeciesNotLanded(speciesNotLanded)` — root-level entry shape and duplicate-`id` detection                                                 |
+| `sections/trip.js`               | `validateTrip(trip)`                                                                                                                               |
+| `catch-record.js`                | `validateCatchRecord(catchRecord)` — composes everything above                                                                                     |
+| `sections/vessel.js`             | `validateVessel(vessel)` — presence/shape of the authoritative vessel reference id                                                                 |
+| `submission-readiness.js`        | `validateSubmissionReadiness(catchRecord, { referenceDataClient, authenticationContext, correlationId })` — Step 32's complete-validation boundary |
 
 ## The validation-result contract
 
@@ -94,9 +96,39 @@ safe validation details.
 - Gear-characteristic value/unit rules.
 - Cross-validation between `weightPrecision` and the actual decimal places of a supplied weight value —
   deliberately not approved; `weightPrecision` is a display hint only.
-- Reference-data validity / snapshot resolution (Phase 4, Steps 15–16).
-- Lifecycle transition eligibility and display status (Step 08).
-- Submission-readiness orchestration composing rules/dependencies not yet implemented (Step 32).
+- Gear ↔ statistical-area / gear ↔ species relationship checks at submission time — the recorded Step 16
+  gap (neither schema carries a gear-reference field); only existence/active-selection is revalidated.
+
+## Step 32: complete-validation (submission readiness)
+
+`validateSubmissionReadiness(catchRecord, { referenceDataClient, authenticationContext, correlationId })`
+(`submission-readiness.js`) is the one reusable complete-validation boundary, callable identically by
+first submission and resubmission (Steps 34/38). It composes, in order:
+
+1. `validateCatchRecord` (structure, gears, pair-fishing, species-not-landed, trip).
+2. `validateVessel` (presence/shape only — vessel has no separate section PATCH anywhere).
+3. Lifecycle eligibility — `canSubmitFirstTime(catchRecord).valid || canResubmit(catchRecord).valid`
+   (Step 08's domain policy, reused as a single boolean gate rather than threading through both
+   functions' own detailed issue sets, which would otherwise duplicate overlapping reasons).
+4. Per-gear completeness — reuses Step 26's `isGearComplete` bar exactly (one characteristic, one
+   statistical area, one species caught, one weight value per species); an in-progress gear that is
+   perfectly valid for a section save is reported as incomplete here. An empty `gears` collection is
+   also rejected (mirrors `evaluateGearsProgress`'s "no gears yet is incomplete" rule).
+5. Submission-time reference-data revalidation — vessel (existence, active-selection, and vessel-access
+   re-confirmed via `resolveVessel`), departure/return ports, each gear, each gear's statistical area,
+   every `speciesCaught` entry, and every `speciesNotLanded` entry. Every stable id actually present is
+   resolved at most once per execution (an in-memory `Map` keyed by `type:id`, scoped to one call —
+   never a cross-request cache). A dependency failure (timeout/unavailable/invalid upstream response) or
+   a vessel-access denial both propagate as a rejected `ApplicationError`, exactly like every other
+   reference-resolution caller — never folded into the returned `{ valid, issues }` result.
+
+Performs no persistence access, artifact generation, or lifecycle transition — Steps 33/34/36/37/38 own
+those.
+
+**No `POST /v1/catch-records/{catchRecordId}/validation` endpoint is exposed.** No authoritative UI
+requirement anywhere in the repository confirms a need to validate a complete record without submitting
+it (the approved condition for adding the optional endpoint) — the reusable capability above is complete
+and ready for Steps 34/38 to call, but is not independently exposed over HTTP.
 
 ## Adding a new rule later
 

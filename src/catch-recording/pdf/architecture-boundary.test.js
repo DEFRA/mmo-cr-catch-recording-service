@@ -1,21 +1,10 @@
 import { readFileSync } from 'node:fs'
 
-const FRAMEWORK_NEUTRAL_FILES = [
-  'validation-result.js',
-  'validation-codes.js',
-  'structural.js',
-  'catch-record.js',
-  'sections/gears.js',
-  'sections/pair-fishing.js',
-  'sections/species-not-landed.js',
-  'sections/trip.js',
-  'sections/vessel.js',
-  'submission-readiness.js'
-]
+const FRAMEWORK_NEUTRAL_FILES = ['pdf-generator.js']
 
-describe('#architecture-boundary (validation)', () => {
+describe('#architecture-boundary (pdf)', () => {
   test.each(FRAMEWORK_NEUTRAL_FILES)(
-    '%s should not import Hapi, Boom, Joi, or MongoDB',
+    '%s should not import Hapi, Boom, Joi, MongoDB, or the AWS SDK',
     (fileName) => {
       const source = readFileSync(
         new URL(`./${fileName}`, import.meta.url),
@@ -26,6 +15,7 @@ describe('#architecture-boundary (validation)', () => {
       expect(source).not.toMatch(/from\s+['"]@hapi\/boom['"]/)
       expect(source).not.toMatch(/from\s+['"]joi['"]/)
       expect(source).not.toMatch(/from\s+['"]mongodb['"]/)
+      expect(source).not.toMatch(/from\s+['"]@aws-sdk\//)
     }
   )
 })

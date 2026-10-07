@@ -43,7 +43,8 @@ function buildFakeCollection() {
       store.set(id, { ...document, _id: id })
       return { acknowledged: true, insertedId: id }
     }),
-    seed: (document) => store.set(document._id, document)
+    seed: (document) => store.set(document._id, document),
+    store
   }
 }
 
@@ -253,6 +254,117 @@ describe('#saveCatchRecordSection', () => {
       db.collections['catch-record-history'].insertOne.mock.calls[0][0]
     expect(historyInsert.eventType).toBe('SECTION_SAVED')
     expect(historyInsert.metadata).toEqual({ section: 'pairFishing' })
+  })
+
+  test('appends an AMENDMENT_SECTION_SAVED history event (not SECTION_SAVED) when saving a section of an amended draft', async () => {
+    const db = buildFakeDb()
+    db.collections['catch-records'].seed(
+      existingDraft({
+        numberOfSubmissions: 1,
+        hasUnsubmittedChanges: true,
+        submittedAt: '2026-10-05T10:00:00Z',
+        submittedBy: OWNER_USER_ID,
+        artifacts: [
+          { submissionNumber: 1, type: 'JSON_SNAPSHOT' },
+          { submissionNumber: 1, type: 'PDF_RECEIPT' }
+        ]
+      })
+    )
+
+    const response = await saveCatchRecordSection({
+      db,
+      referenceDataClient: fakeReferenceDataClient(),
+      authenticationContext: authenticationContext(),
+      catchRecordId: RECORD_ID,
+      expectedVersion: 1,
+      section: 'pairFishing',
+      data: { enabled: false },
+      businessTimezone: 'Europe/London'
+    })
+
+    expect(response.status).toBe('DRAFT')
+    expect(response.displayStatus).toBe('Amended')
+
+    const historyInsert =
+      db.collections['catch-record-history'].insertOne.mock.calls[0][0]
+    expect(historyInsert.eventType).toBe('AMENDMENT_SECTION_SAVED')
+    expect(historyInsert.metadata).toEqual({ section: 'pairFishing' })
+  })
+
+  test('preserves hasUnsubmittedChanges = true and prior artifacts through an amendment-save', async () => {
+    const db = buildFakeDb()
+    db.collections['catch-records'].seed(
+      existingDraft({
+        numberOfSubmissions: 1,
+        hasUnsubmittedChanges: true,
+        artifacts: [
+          { submissionNumber: 1, type: 'JSON_SNAPSHOT' },
+          { submissionNumber: 1, type: 'PDF_RECEIPT' }
+        ]
+      })
+    )
+
+    await saveCatchRecordSection({
+      db,
+      referenceDataClient: fakeReferenceDataClient(),
+      authenticationContext: authenticationContext(),
+      catchRecordId: RECORD_ID,
+      expectedVersion: 1,
+      section: 'pairFishing',
+      data: { enabled: false },
+      businessTimezone: 'Europe/London'
+    })
+
+    const stored = db.collections['catch-records'].store.get(RECORD_ID)
+    expect(stored.hasUnsubmittedChanges).toBe(true)
+    expect(stored.artifacts).toEqual([
+      { submissionNumber: 1, type: 'JSON_SNAPSHOT' },
+      { submissionNumber: 1, type: 'PDF_RECEIPT' }
+    ])
+    expect(stored.numberOfSubmissions).toBe(1)
+  })
+
+  test('rejects a section save on a SUBMITTED record (must edit-start first)', async () => {
+    const db = buildFakeDb()
+    db.collections['catch-records'].seed(
+      existingDraft({ status: 'SUBMITTED', numberOfSubmissions: 1 })
+    )
+
+    await expect(
+      saveCatchRecordSection({
+        db,
+        referenceDataClient: fakeReferenceDataClient(),
+        authenticationContext: authenticationContext(),
+        catchRecordId: RECORD_ID,
+        expectedVersion: 1,
+        section: 'pairFishing',
+        data: { enabled: false },
+        businessTimezone: 'Europe/London'
+      })
+    ).rejects.toMatchObject({
+      category: 'INVALID_LIFECYCLE_TRANSITION',
+      code: 'CATCH_RECORD_SECTION_UPDATE_INELIGIBLE'
+    })
+  })
+
+  test('rejects a section save on a COMPLETE record (must edit-start first)', async () => {
+    const db = buildFakeDb()
+    db.collections['catch-records'].seed(
+      existingDraft({ status: 'COMPLETE', numberOfSubmissions: 1 })
+    )
+
+    await expect(
+      saveCatchRecordSection({
+        db,
+        referenceDataClient: fakeReferenceDataClient(),
+        authenticationContext: authenticationContext(),
+        catchRecordId: RECORD_ID,
+        expectedVersion: 1,
+        section: 'pairFishing',
+        data: { enabled: false },
+        businessTimezone: 'Europe/London'
+      })
+    ).rejects.toMatchObject({ code: 'CATCH_RECORD_SECTION_UPDATE_INELIGIBLE' })
   })
 
   test('rejects an unsupported section name', async () => {
