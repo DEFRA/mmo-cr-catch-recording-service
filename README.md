@@ -50,6 +50,15 @@ Install application dependencies:
 npm install
 ```
 
+Copy [`.env.example`](./.env.example) to `.env` and adjust values for your local environment (every
+value has a safe default in `src/config.js` if left unset — see
+[`docs/api-endpoints.md`](./docs/api-endpoints.md) for which routes need the Authentication Service and
+Reference Data Service URLs configured to function):
+
+```bash
+cp .env.example .env
+```
+
 ### Git hooks
 
 Install git hooks (optional)
@@ -113,6 +122,9 @@ git config --global core.autocrlf false
 ```
 
 ## API endpoints
+
+See [`docs/api-endpoints.md`](./docs/api-endpoints.md) for the complete, current list of every endpoint
+this service exposes (Catch Records, vessel favourites and skippers, platform health).
 
 | Endpoint             | Description                    |
 | :------------------- | :----------------------------- |
@@ -207,6 +219,9 @@ docker compose up --build -d
 
 Mock AWS resources can be created when Floci starts up by editing the scripts in `./compose/floci/start.d/`.
 MongoDB records can also be created when Mongo starts by editing the scripts in `./compose/mongo/`.
+
+See [`docs/running-locally-with-docker-compose.md`](./docs/running-locally-with-docker-compose.md) for a
+complete walkthrough of starting the service this way and testing it manually with `curl`.
 
 ### Dependabot
 
