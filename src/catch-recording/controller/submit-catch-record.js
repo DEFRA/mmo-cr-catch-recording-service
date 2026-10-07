@@ -199,6 +199,89 @@ async function resolveSubmissionSnapshot({
 }
 
 /**
+ * Resolves the idempotency scope for this submission attempt (first submission or resubmission share
+ * the same scope split as the history event type) and starts/replays its claim. Extracted from the main
+ * orchestration function to keep its own cognitive complexity within the approved bound.
+ *
+ * @returns {Promise<{ idempotency: object|undefined, replayResponse: object|undefined }>}
+ */
+async function checkIdempotencyReplay({
+  db,
+  ownerUserId,
+  catchRecordId,
+  idempotencyKey,
+  isResubmission,
+  expectedVersion
+}) {
+  if (!idempotencyKey) {
+    return { idempotency: undefined, replayResponse: undefined }
+  }
+
+  const idempotency = await startIdempotencyClaim({
+    db,
+    ownerUserId,
+    catchRecordId,
+    idempotencyKey,
+    operationScope: isResubmission
+      ? IDEMPOTENCY_OPERATION_SCOPES.RESUBMISSION
+      : IDEMPOTENCY_OPERATION_SCOPES.SUBMISSION,
+    expectedVersion
+  })
+
+  if (idempotency.claim.outcome !== IDEMPOTENCY_CLAIM_OUTCOMES.REPLAY) {
+    return { idempotency, replayResponse: undefined }
+  }
+
+  const existing = await findCatchRecordByIdForOwner(db, {
+    id: catchRecordId,
+    ownerUserId
+  })
+
+  return {
+    idempotency,
+    replayResponse: existing ? buildSubmissionResponse(existing) : undefined
+  }
+}
+
+/**
+ * Resolves (fresh or recovered) the immutable snapshot and commits both submission artifacts. Extracted
+ * from the main orchestration function to keep its own cognitive complexity and length within the
+ * approved bounds.
+ *
+ * @returns {Promise<{ snapshot: object, artifactMetadata: ReadonlyArray<object> }>}
+ */
+async function buildAndStoreSubmissionArtifacts({
+  catchArtifactStore,
+  catchRecord,
+  catchRecordId,
+  submissionNumber,
+  ownerUserId,
+  maxPdfRenderedItems
+}) {
+  const snapshot = await resolveSubmissionSnapshot({
+    catchArtifactStore,
+    catchRecord,
+    catchRecordId,
+    submissionNumber,
+    ownerUserId
+  })
+
+  const jsonBody = Buffer.from(JSON.stringify(snapshot, null, 2), 'utf8')
+  const { body: pdfBody } = await generateSubmissionReceiptPdf(snapshot, {
+    maxRenderedItems: maxPdfRenderedItems
+  })
+
+  const artifactMetadata = await storeSubmissionArtifacts(catchArtifactStore, {
+    catchRecordId,
+    submissionNumber,
+    jsonBody,
+    pdfBody
+  })
+
+  return { snapshot, artifactMetadata }
+}
+
+/**
  * @param {Object} input
  * @param {import('mongodb').Db} input.db
  * @param {object} input.referenceDataClient the Step 15 Reference Data Service client
@@ -238,28 +321,17 @@ export async function submitCatchRecord({
   // Idempotency replay is checked before lifecycle eligibility: a retried request whose first attempt
   // already succeeded will find the record no longer `DRAFT`, which would otherwise fail the lifecycle
   // check before ever reaching the stored replay result.
-  let idempotency
-  if (idempotencyKey) {
-    idempotency = await startIdempotencyClaim({
-      db,
-      ownerUserId,
-      catchRecordId,
-      idempotencyKey,
-      operationScope: isResubmission
-        ? IDEMPOTENCY_OPERATION_SCOPES.RESUBMISSION
-        : IDEMPOTENCY_OPERATION_SCOPES.SUBMISSION,
-      expectedVersion
-    })
+  const { idempotency, replayResponse } = await checkIdempotencyReplay({
+    db,
+    ownerUserId,
+    catchRecordId,
+    idempotencyKey,
+    isResubmission,
+    expectedVersion
+  })
 
-    if (idempotency.claim.outcome === IDEMPOTENCY_CLAIM_OUTCOMES.REPLAY) {
-      const existing = await findCatchRecordByIdForOwner(db, {
-        id: catchRecordId,
-        ownerUserId
-      })
-      if (existing) {
-        return buildSubmissionResponse(existing)
-      }
-    }
+  if (replayResponse) {
+    return replayResponse
   }
 
   if (!canSubmitFirstTime(catchRecord).valid && !isResubmission) {
@@ -280,26 +352,14 @@ export async function submitCatchRecord({
     catchRecord.numberOfSubmissions
   )
 
-  const snapshot = await resolveSubmissionSnapshot({
-    catchArtifactStore,
-    catchRecord,
-    catchRecordId,
-    submissionNumber,
-    ownerUserId
-  })
-
-  const jsonBody = Buffer.from(JSON.stringify(snapshot, null, 2), 'utf8')
-  const { body: pdfBody } = await generateSubmissionReceiptPdf(snapshot, {
-    maxRenderedItems: maxPdfRenderedItems
-  })
-
-  const newArtifactMetadata = await storeSubmissionArtifacts(
-    catchArtifactStore,
+  const { snapshot, artifactMetadata } = await buildAndStoreSubmissionArtifacts(
     {
+      catchArtifactStore,
+      catchRecord,
       catchRecordId,
       submissionNumber,
-      jsonBody,
-      pdfBody
+      ownerUserId,
+      maxPdfRenderedItems
     }
   )
 
@@ -308,7 +368,7 @@ export async function submitCatchRecord({
     ownerUserId,
     expectedVersion,
     submissionNumber,
-    artifacts: [...catchRecord.artifacts, ...newArtifactMetadata],
+    artifacts: [...catchRecord.artifacts, ...artifactMetadata],
     submittedAt: snapshot.submittedAt,
     submittedBy: snapshot.submittedBy,
     updatedAt: snapshot.submittedAt,

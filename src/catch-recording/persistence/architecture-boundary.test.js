@@ -24,6 +24,7 @@ const PERSISTENCE_SOURCE_FILES = [
   'persistence-guards.js',
   'catch-persistence-errors.js',
   'catch-persistence.js',
+  'catch-persistence-lifecycle.js',
   'expected-version.js',
   'catch-history-event.js',
   'catch-history-mapper.js',

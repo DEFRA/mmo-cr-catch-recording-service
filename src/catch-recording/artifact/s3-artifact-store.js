@@ -50,12 +50,126 @@ async function streamToBuffer(body) {
   return Buffer.concat(chunks)
 }
 
+const HTTP_STATUS_NOT_FOUND = 404
+
 function isNotFoundError(error) {
   return (
     error?.name === 'NotFound' ||
     error?.name === 'NoSuchKey' ||
-    error?.$metadata?.httpStatusCode === 404
+    error?.$metadata?.httpStatusCode === HTTP_STATUS_NOT_FOUND
   )
+}
+
+async function headObject({ client, bucketName, key }) {
+  try {
+    return await client.send(
+      new HeadObjectCommand({ Bucket: bucketName, Key: key })
+    )
+  } catch (error) {
+    if (isNotFoundError(error)) {
+      return null
+    }
+    throw artifactRetrievalFailedError(error)
+  }
+}
+
+/**
+ * Writes an artifact at its deterministic key, verifying the write afterwards. Never overwrites a
+ * committed artifact with different content - see the module-level immutability note above. Extracted
+ * from `buildS3CatchArtifactStore` (below) to keep that factory's own length within the approved bound.
+ *
+ * @param {{ client: import('@aws-sdk/client-s3').S3Client, bucketName: string, key: string,
+ *   body: Buffer, contentType: string }} input
+ * @returns {Promise<{ key: string, checksum: string, contentLength: number, contentType: string,
+ *   reused: boolean }>}
+ */
+async function commitArtifactToS3({
+  client,
+  bucketName,
+  key,
+  body,
+  contentType
+}) {
+  const checksum = sha256Hex(body)
+  const existing = await headObject({ client, bucketName, key })
+
+  if (existing) {
+    const existingChecksum = existing.Metadata?.sha256
+    if (existingChecksum && existingChecksum === checksum) {
+      return {
+        key,
+        checksum,
+        contentLength: body.length,
+        contentType,
+        reused: true
+      }
+    }
+    throw artifactIntegrityConflictError()
+  }
+
+  try {
+    await client.send(
+      new PutObjectCommand({
+        Bucket: bucketName,
+        Key: key,
+        Body: body,
+        ContentType: contentType,
+        Metadata: { sha256: checksum }
+      })
+    )
+  } catch (error) {
+    throw artifactWriteFailedError(error)
+  }
+
+  const verification = await headObject({ client, bucketName, key })
+  if (!verification || Number(verification.ContentLength) !== body.length) {
+    throw artifactVerificationFailedError()
+  }
+
+  return {
+    key,
+    checksum,
+    contentLength: body.length,
+    contentType,
+    reused: false
+  }
+}
+
+/**
+ * Retrieves a committed artifact's exact stored bytes, verifying integrity against the checksum
+ * recorded at write time. Extracted from `buildS3CatchArtifactStore` (below) to keep that factory's own
+ * length within the approved bound.
+ *
+ * @param {{ client: import('@aws-sdk/client-s3').S3Client, bucketName: string, key: string }} input
+ * @returns {Promise<{ body: Buffer, contentType: string, contentLength: number, checksum: string }>}
+ */
+async function retrieveArtifactFromS3({ client, bucketName, key }) {
+  let response
+  try {
+    response = await client.send(
+      new GetObjectCommand({ Bucket: bucketName, Key: key })
+    )
+  } catch (error) {
+    if (isNotFoundError(error)) {
+      throw artifactNotFoundError()
+    }
+    throw artifactRetrievalFailedError(error)
+  }
+
+  const body = await streamToBuffer(response.Body)
+  const checksum = sha256Hex(body)
+  const expectedChecksum = response.Metadata?.sha256
+
+  if (expectedChecksum && expectedChecksum !== checksum) {
+    throw artifactVerificationFailedError()
+  }
+
+  return {
+    body,
+    contentType: response.ContentType,
+    contentLength: body.length,
+    checksum
+  }
 }
 
 /**
@@ -67,110 +181,12 @@ function isNotFoundError(error) {
  * @param {{ client: import('@aws-sdk/client-s3').S3Client, bucketName: string }} input
  */
 export function buildS3CatchArtifactStore({ client, bucketName }) {
-  async function headObject(key) {
-    try {
-      return await client.send(
-        new HeadObjectCommand({ Bucket: bucketName, Key: key })
-      )
-    } catch (error) {
-      if (isNotFoundError(error)) {
-        return null
-      }
-      throw artifactRetrievalFailedError(error)
-    }
-  }
-
-  /**
-   * Writes an artifact at its deterministic key, verifying the write afterwards. Never overwrites a
-   * committed artifact with different content - see the module-level immutability note above.
-   *
-   * @param {{ key: string, body: Buffer, contentType: string }} input
-   * @returns {Promise<{ key: string, checksum: string, contentLength: number, contentType: string,
-   *   reused: boolean }>}
-   */
-  async function commitArtifact({ key, body, contentType }) {
-    const checksum = sha256Hex(body)
-    const existing = await headObject(key)
-
-    if (existing) {
-      const existingChecksum = existing.Metadata?.sha256
-      if (existingChecksum && existingChecksum === checksum) {
-        return {
-          key,
-          checksum,
-          contentLength: body.length,
-          contentType,
-          reused: true
-        }
-      }
-      throw artifactIntegrityConflictError()
-    }
-
-    try {
-      await client.send(
-        new PutObjectCommand({
-          Bucket: bucketName,
-          Key: key,
-          Body: body,
-          ContentType: contentType,
-          Metadata: { sha256: checksum }
-        })
-      )
-    } catch (error) {
-      throw artifactWriteFailedError(error)
-    }
-
-    const verification = await headObject(key)
-    if (!verification || Number(verification.ContentLength) !== body.length) {
-      throw artifactVerificationFailedError()
-    }
-
-    return {
-      key,
-      checksum,
-      contentLength: body.length,
-      contentType,
-      reused: false
-    }
-  }
-
-  /**
-   * Retrieves a committed artifact's exact stored bytes, verifying integrity against the checksum
-   * recorded at write time.
-   *
-   * @param {string} key
-   * @returns {Promise<{ body: Buffer, contentType: string, contentLength: number, checksum: string }>}
-   */
-  async function retrieveArtifact(key) {
-    let response
-    try {
-      response = await client.send(
-        new GetObjectCommand({ Bucket: bucketName, Key: key })
-      )
-    } catch (error) {
-      if (isNotFoundError(error)) {
-        throw artifactNotFoundError()
-      }
-      throw artifactRetrievalFailedError(error)
-    }
-
-    const body = await streamToBuffer(response.Body)
-    const checksum = sha256Hex(body)
-    const expectedChecksum = response.Metadata?.sha256
-
-    if (expectedChecksum && expectedChecksum !== checksum) {
-      throw artifactVerificationFailedError()
-    }
-
-    return {
-      body,
-      contentType: response.ContentType,
-      contentLength: body.length,
-      checksum
-    }
-  }
-
-  return Object.freeze({ commitArtifact, retrieveArtifact })
+  return Object.freeze({
+    commitArtifact: ({ key, body, contentType }) =>
+      commitArtifactToS3({ client, bucketName, key, body, contentType }),
+    retrieveArtifact: (key) =>
+      retrieveArtifactFromS3({ client, bucketName, key })
+  })
 }
 
 /**
