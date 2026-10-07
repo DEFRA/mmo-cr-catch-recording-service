@@ -1,7 +1,4 @@
-import {
-  getVesselProfileCollection,
-  ensureVesselProfileIndexes
-} from './vessel-profile-collection.js'
+import { getVesselProfileCollection } from './vessel-profile-collection.js'
 import { toCanonicalProfile } from './vessel-profile-mapper.js'
 import { assertPlainString } from './persistence-guards.js'
 import {
@@ -9,6 +6,8 @@ import {
   malformedVesselProfileDocumentError,
   unexpectedVesselProfilePersistenceError
 } from './vessel-profile-errors.js'
+
+export { ensureVesselProfileIndexes } from './vessel-profile-collection.js'
 
 /**
  * `VesselProfilePersistence`: the sole Catch Recording owner of vessel-profile (favourites/skippers)
@@ -24,8 +23,6 @@ import {
  * claims, Catch Record access, or any business orchestration — those are the calling controller's
  * responsibility. See `docs/catch-recording-vessel-profiles.md` for the full contract.
  */
-
-export { ensureVesselProfileIndexes }
 
 /** The one retry this module ever performs — see `attemptAddSkipper`'s docstring. */
 const MAX_SKIPPER_ADD_ATTEMPTS = 2
