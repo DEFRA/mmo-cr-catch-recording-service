@@ -203,7 +203,7 @@ async function resolveSubmissionSnapshot({
  * the same scope split as the history event type) and starts/replays its claim. Extracted from the main
  * orchestration function to keep its own cognitive complexity within the approved bound.
  *
- * @returns {Promise<{ idempotency: object|undefined, replayResponse: object|undefined }>}
+ * @returns {Promise<{ idempotency: object|null, replayResponse: object|null }>}
  */
 async function checkIdempotencyReplay({
   db,
@@ -214,7 +214,7 @@ async function checkIdempotencyReplay({
   expectedVersion
 }) {
   if (!idempotencyKey) {
-    return { idempotency: undefined, replayResponse: undefined }
+    return { idempotency: null, replayResponse: null }
   }
 
   const idempotency = await startIdempotencyClaim({
@@ -229,7 +229,7 @@ async function checkIdempotencyReplay({
   })
 
   if (idempotency.claim.outcome !== IDEMPOTENCY_CLAIM_OUTCOMES.REPLAY) {
-    return { idempotency, replayResponse: undefined }
+    return { idempotency, replayResponse: null }
   }
 
   const existing = await findCatchRecordByIdForOwner(db, {
@@ -239,7 +239,7 @@ async function checkIdempotencyReplay({
 
   return {
     idempotency,
-    replayResponse: existing ? buildSubmissionResponse(existing) : undefined
+    replayResponse: existing ? buildSubmissionResponse(existing) : null
   }
 }
 
@@ -282,58 +282,20 @@ async function buildAndStoreSubmissionArtifacts({
 }
 
 /**
- * @param {Object} input
- * @param {import('mongodb').Db} input.db
- * @param {object} input.referenceDataClient the Step 15 Reference Data Service client
- * @param {object} input.catchArtifactStore the Step 33 `CatchArtifact` storage adapter
- * @param {{ userId: string, scopes: ReadonlyArray<string> }} input.authenticationContext
- * @param {string} input.catchRecordId
- * @param {number} input.expectedVersion
- * @param {string|undefined} input.idempotencyKey optional `Idempotency-Key` header value
- * @param {number} [input.maxPdfRenderedItems]
- * @param {string} [input.correlationId]
- * @returns {Promise<object>} The approved submission response.
+ * Validates lifecycle eligibility and complete-validation readiness together, exactly in that order (a
+ * record not yet eligible to submit should never pay the cost of reference-data revalidation). Extracted
+ * from the main orchestration function to keep its own length within the approved bound.
+ *
+ * @throws {import('#/common/helpers/errors/application-error.js').ApplicationError}
+ *   `SUBMISSION_INELIGIBLE` or an `ARTIFACT_OPERATION_FAILURE`-adjacent validation failure.
  */
-export async function submitCatchRecord({
-  db,
+async function assertSubmissionEligible({
+  catchRecord,
+  isResubmission,
   referenceDataClient,
-  catchArtifactStore,
   authenticationContext,
-  catchRecordId,
-  expectedVersion,
-  idempotencyKey,
-  maxPdfRenderedItems,
   correlationId
 }) {
-  const ownerUserId = authenticationContext?.userId
-
-  const catchRecord = await findCatchRecordByIdForOwner(db, {
-    id: catchRecordId,
-    ownerUserId
-  })
-
-  if (!catchRecord) {
-    throw catchRecordNotFoundError()
-  }
-
-  const isResubmission = canResubmit(catchRecord).valid
-
-  // Idempotency replay is checked before lifecycle eligibility: a retried request whose first attempt
-  // already succeeded will find the record no longer `DRAFT`, which would otherwise fail the lifecycle
-  // check before ever reaching the stored replay result.
-  const { idempotency, replayResponse } = await checkIdempotencyReplay({
-    db,
-    ownerUserId,
-    catchRecordId,
-    idempotencyKey,
-    isResubmission,
-    expectedVersion
-  })
-
-  if (replayResponse) {
-    return replayResponse
-  }
-
   if (!canSubmitFirstTime(catchRecord).valid && !isResubmission) {
     throw submissionIneligibleError()
   }
@@ -347,22 +309,26 @@ export async function submitCatchRecord({
   if (!validationResult.valid) {
     throw submissionValidationError(validationResult.issues)
   }
+}
 
-  const submissionNumber = calculateNextSubmissionNumber(
-    catchRecord.numberOfSubmissions
-  )
-
-  const { snapshot, artifactMetadata } = await buildAndStoreSubmissionArtifacts(
-    {
-      catchArtifactStore,
-      catchRecord,
-      catchRecordId,
-      submissionNumber,
-      ownerUserId,
-      maxPdfRenderedItems
-    }
-  )
-
+/**
+ * Commits the atomic submission update and appends the matching history event. Extracted from the main
+ * orchestration function to keep its own length within the approved bound.
+ *
+ * @returns {Promise<import('../domain/canonical-catch-record.js').CatchRecord>} The updated record.
+ * @throws {import('#/common/helpers/errors/application-error.js').ApplicationError}
+ */
+async function commitSubmission({
+  db,
+  catchRecord,
+  catchRecordId,
+  ownerUserId,
+  expectedVersion,
+  submissionNumber,
+  snapshot,
+  artifactMetadata,
+  isResubmission
+}) {
   const updated = await applySubmission(db, {
     id: catchRecordId,
     ownerUserId,
@@ -390,6 +356,68 @@ export async function submitCatchRecord({
     metadata: { submissionNumber }
   })
 
+  return updated
+}
+
+/**
+ * Loads the target record and resolves idempotency replay together — the two concerns that must run,
+ * in this order, before any eligibility or artifact work begins. Extracted from the main orchestration
+ * function to keep its own length within the approved bound.
+ *
+ * @returns {Promise<{ catchRecord: object, isResubmission: boolean, idempotency: object|null,
+ *   replayResponse: object|null }>}
+ * @throws {import('#/common/helpers/errors/application-error.js').ApplicationError}
+ *   `CATCH_RECORD_NOT_FOUND`.
+ */
+async function loadSubmissionContext({
+  db,
+  ownerUserId,
+  catchRecordId,
+  idempotencyKey,
+  expectedVersion
+}) {
+  const catchRecord = await findCatchRecordByIdForOwner(db, {
+    id: catchRecordId,
+    ownerUserId
+  })
+
+  if (!catchRecord) {
+    throw catchRecordNotFoundError()
+  }
+
+  const isResubmission = canResubmit(catchRecord).valid
+
+  // Idempotency replay is checked before lifecycle eligibility: a retried request whose first attempt
+  // already succeeded will find the record no longer `DRAFT`, which would otherwise fail the lifecycle
+  // check before ever reaching the stored replay result.
+  const { idempotency, replayResponse } = await checkIdempotencyReplay({
+    db,
+    ownerUserId,
+    catchRecordId,
+    idempotencyKey,
+    isResubmission,
+    expectedVersion
+  })
+
+  return { catchRecord, isResubmission, idempotency, replayResponse }
+}
+
+/**
+ * Shapes the approved response and, when this attempt carried an `Idempotency-Key`, records the claim's
+ * completed result for future replay. Extracted from the main orchestration function to keep its own
+ * length within the approved bound.
+ *
+ * @returns {Promise<object>} The approved submission response.
+ */
+async function finaliseSubmission({
+  db,
+  updated,
+  idempotencyKey,
+  idempotency,
+  isResubmission,
+  catchRecordId,
+  ownerUserId
+}) {
   const response = buildSubmissionResponse(updated)
 
   if (idempotencyKey) {
@@ -407,4 +435,89 @@ export async function submitCatchRecord({
   }
 
   return response
+}
+
+/**
+ * @param {Object} input
+ * @param {import('mongodb').Db} input.db
+ * @param {object} input.referenceDataClient the Step 15 Reference Data Service client
+ * @param {object} input.catchArtifactStore the Step 33 `CatchArtifact` storage adapter
+ * @param {{ userId: string, scopes: ReadonlyArray<string> }} input.authenticationContext
+ * @param {string} input.catchRecordId
+ * @param {number} input.expectedVersion
+ * @param {string|undefined} input.idempotencyKey optional `Idempotency-Key` header value
+ * @param {number} [input.maxPdfRenderedItems]
+ * @param {string} [input.correlationId]
+ * @returns {Promise<object>} The approved submission response.
+ */
+export async function submitCatchRecord({
+  db,
+  referenceDataClient,
+  catchArtifactStore,
+  authenticationContext,
+  catchRecordId,
+  expectedVersion,
+  idempotencyKey,
+  maxPdfRenderedItems,
+  correlationId
+}) {
+  const ownerUserId = authenticationContext?.userId
+
+  const { catchRecord, isResubmission, idempotency, replayResponse } =
+    await loadSubmissionContext({
+      db,
+      ownerUserId,
+      catchRecordId,
+      idempotencyKey,
+      expectedVersion
+    })
+
+  if (replayResponse) {
+    return replayResponse
+  }
+
+  await assertSubmissionEligible({
+    catchRecord,
+    isResubmission,
+    referenceDataClient,
+    authenticationContext,
+    correlationId
+  })
+
+  const submissionNumber = calculateNextSubmissionNumber(
+    catchRecord.numberOfSubmissions
+  )
+
+  const { snapshot, artifactMetadata } = await buildAndStoreSubmissionArtifacts(
+    {
+      catchArtifactStore,
+      catchRecord,
+      catchRecordId,
+      submissionNumber,
+      ownerUserId,
+      maxPdfRenderedItems
+    }
+  )
+
+  const updated = await commitSubmission({
+    db,
+    catchRecord,
+    catchRecordId,
+    ownerUserId,
+    expectedVersion,
+    submissionNumber,
+    snapshot,
+    artifactMetadata,
+    isResubmission
+  })
+
+  return finaliseSubmission({
+    db,
+    updated,
+    idempotencyKey,
+    idempotency,
+    isResubmission,
+    catchRecordId,
+    ownerUserId
+  })
 }
