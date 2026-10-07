@@ -4,6 +4,7 @@ import { LockManager } from 'mongo-locks'
 import { ensureCatchRecordIndexes } from '#/catch-recording/persistence/catch-persistence.js'
 import { ensureCatchHistoryIndexes } from '#/catch-recording/persistence/catch-history-persistence.js'
 import { ensureCatchIdempotencyIndexes } from '#/catch-recording/persistence/catch-idempotency-persistence.js'
+import { ensureVesselProfileIndexes } from '#/catch-recording/persistence/vessel-profile-persistence.js'
 
 export const mongoDb = {
   plugin: {
@@ -51,4 +52,5 @@ async function createIndexes(db) {
   await ensureCatchRecordIndexes(db)
   await ensureCatchHistoryIndexes(db)
   await ensureCatchIdempotencyIndexes(db)
+  await ensureVesselProfileIndexes(db)
 }

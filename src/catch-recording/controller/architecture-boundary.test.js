@@ -12,7 +12,10 @@ const FRAMEWORK_NEUTRAL_FILES = [
   'list-submission-artifacts.js',
   'retrieve-submission-artifact.js',
   'complete-catch-record.js',
-  'start-catch-record-edit.js'
+  'start-catch-record-edit.js',
+  'vessel-profile-access.js',
+  'vessel-favourites.js',
+  'vessel-skippers.js'
 ]
 
 describe('#architecture-boundary (controller authentication)', () => {

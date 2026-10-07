@@ -485,6 +485,42 @@ production traffic yet, documented here as decisions rather than invented silent
   touches `numberOfSubmissions`, so this is equivalent and avoids an extra database read per section
   save.
 
+## Phase 9 decisions (Step 39): vessel favourites and skippers
+
+No authoritative document anywhere (the detailed plan, phase plan, or design document) defines a skipper
+field schema, skipper update requirement, vessel-profile retention policy, favourite/skipper add-remove
+response contract, or skipper duplicate rule — each was listed as a decision required before Step 39 and
+remained unresolved until now. Resolved with the user as follows:
+
+- **Skipper field schema**: server-generated `id` (never client-supplied); required `name`; optional
+  `phoneNumber`; optional `email`. No licence/registration field. Internal-only audit metadata
+  (`createdAt`/`createdBy`/`updatedAt`/`updatedBy`) is never exposed in a response — only `id`, `name`,
+  `phoneNumber`, `email`.
+- **Skipper update**: not implemented — resolved from evidence (no authoritative UI contract confirms it
+  anywhere); list/add/remove only.
+- **Vessel-profile retention**: retained indefinitely, including when every favourite/skipper has been
+  removed (an empty profile document is never deleted). No TTL. No automatic purge when the authoritative
+  vessel becomes inactive or a caller loses vessel access.
+- **Favourite response contract**: stable reference IDs only — resolved from evidence (the approved
+  conceptual profile is `favourite*Ids` arrays; no stored or live-resolved snapshot is approved anywhere).
+- **Favourite/skipper add contract**: the reference ID (or skipper object) is supplied in the payload, not
+  the path. `200 OK`; the response body is the full current favourite/skipper list for that one resource
+  type on that vessel. Idempotent — repeating an add with a duplicate ID/name returns the same `200`
+  representation, never an error.
+- **Favourite/skipper remove contract**: `204 No Content` for both first and repeated removal — an
+  already-absent favourite/skipper is a safe no-op, never an error. The profile document is never deleted
+  by a removal (ties to the retention decision above).
+- **Skipper duplicate semantics**: case-insensitive, trimmed exact `name` match within the same vessel
+  only — no fuzzy matching, no cross-vessel matching, no external/global identity.
+- **Idempotency-Key is optional** on every add endpoint — resolved from evidence: `ADD_FAVOURITE`/
+  `ADD_SKIPPER` are already-approved idempotency scopes (`idempotency-operation-scope.js`, Step 12 plan
+  §5.2), extending the same optional-header pattern used throughout the service (Step 18 draft creation
+  onward). The persistence layer's atomic `$addToSet`/dedupe-`$push` is the complete duplicate-prevention
+  and idempotent-addition mechanism regardless of whether a key is supplied; the key's only additional
+  effect is letting a retried favourite-add skip a redundant Reference Data Service lookup.
+- **Authentication**: out of scope for this phase's decisions — the existing mock Authentication Service
+  (Step 13) already trusts/authorises every request; Step 39 introduces no new authentication mechanics.
+
 ## Security and privacy
 
 No credential, token, access key, or secret key is introduced by this step (none was added — there is no
