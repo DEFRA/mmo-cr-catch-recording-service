@@ -180,7 +180,7 @@ function mockAuth() {
 function mockAuthAndVesselAccess({ accessibleVesselIds = ['vessel-1'] } = {}) {
   mockAuth()
   fetchMock.mockResponseOnce(
-    JSON.stringify(accessibleVesselIds.map((id) => ({ id })))
+    JSON.stringify({ items: accessibleVesselIds.map((id) => ({ id })) })
   )
 }
 

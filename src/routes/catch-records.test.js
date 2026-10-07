@@ -298,7 +298,7 @@ function mockSuccessfulAuthAndVessel() {
   fetchMock.mockResponseOnce(
     JSON.stringify({ actorId: 'owner-1', permissions: [] })
   )
-  fetchMock.mockResponseOnce(JSON.stringify([{ id: 'vessel-1' }]))
+  fetchMock.mockResponseOnce(JSON.stringify({ items: [{ id: 'vessel-1' }] }))
   fetchMock.mockResponseOnce(JSON.stringify(validVesselBody()))
 }
 
@@ -354,7 +354,7 @@ describe('POST /v1/catch-records', () => {
     fetchMock.mockResponseOnce(
       JSON.stringify({ actorId: 'owner-1', permissions: [] })
     )
-    fetchMock.mockResponseOnce(JSON.stringify([]))
+    fetchMock.mockResponseOnce(JSON.stringify({ items: [] }))
     fetchMock.mockResponseOnce(JSON.stringify(validVesselBody()))
 
     const response = await server.inject({
@@ -1472,7 +1472,7 @@ describe('PUT /v1/catch-records/{catchRecordId}', () => {
     fetchMock.mockResponseOnce(
       JSON.stringify({ actorId: 'owner-1', permissions: [] })
     )
-    fetchMock.mockResponseOnce(JSON.stringify([{ id: 'vessel-1' }]))
+    fetchMock.mockResponseOnce(JSON.stringify({ items: [{ id: 'vessel-1' }] }))
     fetchMock.mockResponseOnce(JSON.stringify(validVesselBody()))
     fetchMock.mockResponseOnce(
       JSON.stringify({
@@ -1565,7 +1565,7 @@ describe('PUT /v1/catch-records/{catchRecordId}', () => {
     fetchMock.mockResponseOnce(
       JSON.stringify({ actorId: 'owner-1', permissions: [] })
     )
-    fetchMock.mockResponseOnce(JSON.stringify([{ id: 'vessel-1' }]))
+    fetchMock.mockResponseOnce(JSON.stringify({ items: [{ id: 'vessel-1' }] }))
     fetchMock.mockResponseOnce(JSON.stringify(validVesselBody()))
     fetchMock.mockResponseOnce(
       JSON.stringify({
@@ -1910,7 +1910,7 @@ function mockSubmissionReferenceData() {
       url.includes('/reference-data/vessels') &&
       !url.includes('/vessels/vessel-1')
     ) {
-      return JSON.stringify([{ id: 'vessel-1' }])
+      return JSON.stringify({ items: [{ id: 'vessel-1' }] })
     }
 
     if (url.includes('/reference-data/ports/port-1')) {
