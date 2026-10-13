@@ -40,6 +40,157 @@ const MAX_COMPLETE_REPLACEMENT_PAYLOAD_BYTES = 1_048_576
 const DEFAULT_LIST_LIMIT = 20
 const MAX_LIST_QUERY_LIMIT = 100
 
+// Step 41: response schemas for `hapi-swagger`'s live documentation generation only — paired with
+// `failAction: 'log'` on every route below so a schema/response mismatch is only ever logged, never
+// alters the real HTTP status, body, or headers a caller receives. Intentionally looser than the
+// request-validation schemas above (`.unknown(true)` on nested domain objects) rather than duplicating
+// the full canonical Catch Record shape already owned by `src/catch-recording/domain/`.
+const sectionCompletionResponseSchema = Joi.object({
+  trip: Joi.boolean(),
+  pairFishing: Joi.boolean(),
+  gears: Joi.boolean()
+}).label('SectionCompletion')
+
+const progressResponseSchema = Joi.object({
+  hasUnsubmittedChanges: Joi.boolean(),
+  numberOfSubmissions: Joi.number().integer(),
+  incompleteGearAssociationIds: Joi.array().items(Joi.string()),
+  currentIncompleteGearAssociationId: Joi.string().allow(null),
+  allGearsComplete: Joi.boolean()
+}).label('Progress')
+
+const standardSaveResponseSchema = Joi.object({
+  id: Joi.string(),
+  catchRecordReference: Joi.string(),
+  status: Joi.string().valid(...Object.values(PERSISTED_STATUSES)),
+  displayStatus: Joi.string(),
+  version: Joi.number().integer(),
+  savedSection: Joi.string()
+    .valid(...SECTION_ALLOW_LIST)
+    .allow(null),
+  sectionCompletion: sectionCompletionResponseSchema,
+  progress: progressResponseSchema
+}).label('StandardSaveResponse')
+
+const artifactMetadataResponseSchema = Joi.object({
+  submissionNumber: Joi.number().integer(),
+  type: Joi.string().valid('JSON_SNAPSHOT', 'PDF_RECEIPT')
+}).label('ArtifactMetadata')
+
+const submissionResponseSchema = standardSaveResponseSchema
+  .keys({
+    submittedAt: Joi.string().allow(null),
+    submittedBy: Joi.string().allow(null),
+    artifacts: Joi.array().items(artifactMetadataResponseSchema)
+  })
+  .label('SubmissionResponse')
+
+const completionResponseSchema = standardSaveResponseSchema
+  .keys({
+    completedAt: Joi.string().allow(null),
+    completedBy: Joi.string().allow(null)
+  })
+  .label('CompletionResponse')
+
+const catchRecordDetailResponseSchema = Joi.object({
+  schemaVersion: Joi.number().integer(),
+  id: Joi.string(),
+  catchRecordReference: Joi.string(),
+  ownerUserId: Joi.string(),
+  status: Joi.string().valid(...Object.values(PERSISTED_STATUSES)),
+  displayStatus: Joi.string(),
+  version: Joi.number().integer(),
+  numberOfSubmissions: Joi.number().integer(),
+  hasUnsubmittedChanges: Joi.boolean(),
+  vessel: Joi.object().unknown(true),
+  trip: Joi.object().unknown(true),
+  pairFishing: Joi.object().unknown(true),
+  gears: Joi.array().items(Joi.object().unknown(true)),
+  speciesNotLanded: Joi.array().items(Joi.object().unknown(true)),
+  artifacts: Joi.array().items(artifactMetadataResponseSchema),
+  createdAt: Joi.string(),
+  createdBy: Joi.string(),
+  updatedAt: Joi.string(),
+  updatedBy: Joi.string(),
+  submittedAt: Joi.string().allow(null),
+  submittedBy: Joi.string().allow(null),
+  completedAt: Joi.string().allow(null),
+  completedBy: Joi.string().allow(null),
+  sectionCompletion: sectionCompletionResponseSchema,
+  completedSections: Joi.array().items(
+    Joi.string().valid('trip', 'pairFishing', 'gears')
+  ),
+  incompleteSections: Joi.array().items(
+    Joi.string().valid('trip', 'pairFishing', 'gears')
+  ),
+  progress: progressResponseSchema,
+  submissionEligible: Joi.boolean()
+}).label('CatchRecordDetailResponse')
+
+const catchRecordListItemResponseSchema = Joi.object({
+  id: Joi.string(),
+  catchRecordReference: Joi.string(),
+  status: Joi.string().valid(...Object.values(PERSISTED_STATUSES)),
+  displayStatus: Joi.string(),
+  version: Joi.number().integer(),
+  vessel: Joi.object({
+    nameSnapshot: Joi.string(),
+    rssSnapshot: Joi.string()
+  }),
+  trip: Joi.object({
+    dateStarted: Joi.string().allow(null),
+    dateEnded: Joi.string().allow(null)
+  }),
+  createdAt: Joi.string(),
+  updatedAt: Joi.string(),
+  submittedAt: Joi.string().allow(null),
+  completedAt: Joi.string().allow(null),
+  progress: Joi.object({ allGearsComplete: Joi.boolean() })
+}).label('CatchRecordListItem')
+
+const catchRecordListResponseSchema = Joi.object({
+  items: Joi.array().items(catchRecordListItemResponseSchema),
+  limit: Joi.number().integer(),
+  count: Joi.number().integer()
+}).label('CatchRecordListResponse')
+
+const historyEventResponseSchema = Joi.object({
+  id: Joi.string(),
+  eventType: Joi.string(),
+  timestamp: Joi.string(),
+  actor: Joi.string(),
+  section: Joi.string(),
+  submissionNumber: Joi.number().integer()
+}).label('HistoryEvent')
+
+const historyResponseSchema = Joi.object({
+  catchRecordId: Joi.string(),
+  status: Joi.string().valid(...Object.values(PERSISTED_STATUSES)),
+  displayStatus: Joi.string(),
+  version: Joi.number().integer(),
+  hasUnsubmittedChanges: Joi.boolean(),
+  numberOfSubmissions: Joi.number().integer(),
+  events: Joi.array().items(historyEventResponseSchema)
+}).label('HistoryResponse')
+
+const submissionArtifactEntryResponseSchema = Joi.object({
+  type: Joi.string().valid(...Object.keys(PUBLIC_ARTIFACT_TYPES)),
+  contentType: Joi.string(),
+  contentLength: Joi.number().integer(),
+  checksum: Joi.string()
+}).label('SubmissionArtifactEntry')
+
+const submissionGroupResponseSchema = Joi.object({
+  submissionNumber: Joi.number().integer(),
+  artifacts: Joi.array().items(submissionArtifactEntryResponseSchema)
+}).label('SubmissionGroup')
+
+const submissionArtifactsListResponseSchema = Joi.object({
+  catchRecordId: Joi.string(),
+  count: Joi.number().integer(),
+  submissions: Joi.array().items(submissionGroupResponseSchema)
+}).label('SubmissionArtifactsListResponse')
+
 const listCatchRecordsQuerySchema = Joi.object({
   limit: Joi.number()
     .integer()
@@ -179,7 +330,11 @@ const sectionPatchPayloadSchema = Joi.object({
     is: Joi.valid(...ARRAY_VALUED_SECTIONS),
     then: Joi.array().items(Joi.object().unknown(true)).required(),
     otherwise: Joi.object().unknown(true).required()
-  })
+  }).description(
+    'An object for `trip`/`pairFishing`; an array of objects for `gears`/`speciesNotLanded`. ' +
+      'Known hapi-swagger limitation: this conditional shape renders generically in the generated ' +
+      'OpenAPI document rather than as the precise object-or-array union described here.'
+  )
 }).required()
 
 async function saveCatchRecordSectionHandler(request, h) {
@@ -307,9 +462,11 @@ export const catchRecords = [
     path: '/v1/catch-records',
     options: {
       auth: AUTH_STRATEGY,
+      tags: ['api', 'Catch Records'],
       validate: {
         query: listCatchRecordsQuerySchema
-      }
+      },
+      response: { failAction: 'log', schema: catchRecordListResponseSchema }
     },
     handler: listCatchRecordsHandler
   },
@@ -318,10 +475,12 @@ export const catchRecords = [
     path: '/v1/catch-records',
     options: {
       auth: AUTH_STRATEGY,
+      tags: ['api', 'Catch Records'],
       validate: {
         headers: createDraftHeadersSchema,
         payload: createDraftPayloadSchema
-      }
+      },
+      response: { failAction: 'log', schema: standardSaveResponseSchema }
     },
     handler: createDraftCatchRecordHandler
   },
@@ -330,9 +489,11 @@ export const catchRecords = [
     path: CATCH_RECORD_PATH,
     options: {
       auth: AUTH_STRATEGY,
+      tags: ['api', 'Catch Records'],
       validate: {
         params: catchRecordIdParamsSchema
-      }
+      },
+      response: { failAction: 'log', schema: catchRecordDetailResponseSchema }
     },
     handler: retrieveCatchRecordHandler
   },
@@ -341,12 +502,14 @@ export const catchRecords = [
     path: CATCH_RECORD_PATH,
     options: {
       auth: AUTH_STRATEGY,
+      tags: ['api', 'Catch Records'],
       payload: { maxBytes: MAX_COMPLETE_REPLACEMENT_PAYLOAD_BYTES },
       validate: {
         params: catchRecordIdParamsSchema,
         headers: expectedVersionHeadersSchema,
         payload: completeReplacementPayloadSchema
-      }
+      },
+      response: { failAction: 'log', schema: standardSaveResponseSchema }
     },
     handler: replaceCatchRecordHandler
   },
@@ -355,10 +518,12 @@ export const catchRecords = [
     path: `${CATCH_RECORD_PATH}/history`,
     options: {
       auth: AUTH_STRATEGY,
+      tags: ['api', 'Catch Records'],
       validate: {
         params: catchRecordIdParamsSchema,
         query: catchRecordHistoryQuerySchema
-      }
+      },
+      response: { failAction: 'log', schema: historyResponseSchema }
     },
     handler: getCatchRecordHistoryHandler
   },
@@ -367,6 +532,7 @@ export const catchRecords = [
     path: CATCH_RECORD_PATH,
     options: {
       auth: AUTH_STRATEGY,
+      tags: ['api', 'Catch Records'],
       validate: {
         params: catchRecordIdParamsSchema,
         headers: expectedVersionHeadersSchema
@@ -379,11 +545,13 @@ export const catchRecords = [
     path: CATCH_RECORD_PATH,
     options: {
       auth: AUTH_STRATEGY,
+      tags: ['api', 'Catch Records'],
       validate: {
         params: catchRecordIdParamsSchema,
         headers: expectedVersionHeadersSchema,
         payload: sectionPatchPayloadSchema
-      }
+      },
+      response: { failAction: 'log', schema: standardSaveResponseSchema }
     },
     handler: saveCatchRecordSectionHandler
   },
@@ -392,10 +560,12 @@ export const catchRecords = [
     path: `${CATCH_RECORD_PATH}/submission`,
     options: {
       auth: AUTH_STRATEGY,
+      tags: ['api', 'Catch Records'],
       validate: {
         params: catchRecordIdParamsSchema,
         headers: submissionHeadersSchema
-      }
+      },
+      response: { failAction: 'log', schema: submissionResponseSchema }
     },
     handler: submitCatchRecordHandler
   },
@@ -404,8 +574,13 @@ export const catchRecords = [
     path: `${CATCH_RECORD_PATH}/submissions`,
     options: {
       auth: AUTH_STRATEGY,
+      tags: ['api', 'Catch Records'],
       validate: {
         params: catchRecordIdParamsSchema
+      },
+      response: {
+        failAction: 'log',
+        schema: submissionArtifactsListResponseSchema
       }
     },
     handler: listSubmissionArtifactsHandler
@@ -415,6 +590,10 @@ export const catchRecords = [
     path: `${CATCH_RECORD_PATH}/submissions/{submissionNumber}/{artifactType}`,
     options: {
       auth: AUTH_STRATEGY,
+      tags: ['api', 'Catch Records'],
+      notes:
+        'Returns the artifact file as a binary attachment download (JSON snapshot or PDF receipt), ' +
+        'not a JSON response body — no response schema is declared for this reason.',
       validate: {
         params: submissionArtifactParamsSchema
       }
@@ -426,10 +605,12 @@ export const catchRecords = [
     path: `${CATCH_RECORD_PATH}/completion`,
     options: {
       auth: AUTH_STRATEGY,
+      tags: ['api', 'Catch Records'],
       validate: {
         params: catchRecordIdParamsSchema,
         headers: submissionHeadersSchema
-      }
+      },
+      response: { failAction: 'log', schema: completionResponseSchema }
     },
     handler: completeCatchRecordHandler
   },
@@ -438,10 +619,12 @@ export const catchRecords = [
     path: `${CATCH_RECORD_PATH}/edit-start`,
     options: {
       auth: AUTH_STRATEGY,
+      tags: ['api', 'Catch Records'],
       validate: {
         params: catchRecordIdParamsSchema,
         headers: submissionHeadersSchema
-      }
+      },
+      response: { failAction: 'log', schema: standardSaveResponseSchema }
     },
     handler: startCatchRecordEditHandler
   }

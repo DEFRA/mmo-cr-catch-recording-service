@@ -4,6 +4,11 @@
 > request/response contracts and business rules see the linked per-capability documentation; this
 > document is the quick-reference index, not a duplicate of those contracts.
 
+Live, auto-generated **OpenAPI 3.0** documentation for every endpoint below is also served directly by
+the running service at `GET /openapi.json` (machine-readable) and `GET /documentation` (interactive
+Swagger UI) — see the [README's "OpenAPI documentation" section](../README.md#openapi-documentation) for
+how it's generated and its one known limitation.
+
 ## Conventions used below
 
 - **Auth** — `authentication-service` means the route requires a trusted bearer token (see

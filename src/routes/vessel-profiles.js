@@ -70,6 +70,25 @@ const skipperIdParamsSchema = vesselIdParamsSchema.keys({
   skipperId: Joi.string().trim().min(1).required()
 })
 
+function favouriteListResponseSchema(responseField) {
+  return Joi.object({
+    vesselId: Joi.string(),
+    [responseField]: Joi.array().items(Joi.string())
+  }).label(`${responseField[0].toUpperCase()}${responseField.slice(1)}Response`)
+}
+
+const skipperSchema = Joi.object({
+  id: Joi.string(),
+  name: Joi.string(),
+  phoneNumber: Joi.string().allow(null),
+  email: Joi.string().allow(null)
+}).label('Skipper')
+
+const skippersResponseSchema = Joi.object({
+  vesselId: Joi.string(),
+  skippers: Joi.array().items(skipperSchema)
+}).label('SkippersResponse')
+
 function buildListHandler(listOperation) {
   return async function listHandler(request, h) {
     const response = await listOperation({
@@ -150,6 +169,7 @@ const FAVOURITE_ROUTES = [
   {
     path: 'favourite-gears',
     idField: 'gearId',
+    responseField: 'favouriteGearIds',
     list: listFavouriteGears,
     add: addFavouriteGear,
     remove: removeFavouriteGear
@@ -157,6 +177,7 @@ const FAVOURITE_ROUTES = [
   {
     path: 'favourite-species',
     idField: 'speciesId',
+    responseField: 'favouriteSpeciesIds',
     list: listFavouriteSpecies,
     add: addFavouriteSpecies,
     remove: removeFavouriteSpecies
@@ -164,15 +185,24 @@ const FAVOURITE_ROUTES = [
   {
     path: 'favourite-ports',
     idField: 'portId',
+    responseField: 'favouritePortIds',
     list: listFavouritePorts,
     add: addFavouritePort,
     remove: removeFavouritePort
   }
 ]
 
-function buildFavouriteRoutes({ path, idField, list, add, remove }) {
+function buildFavouriteRoutes({
+  path,
+  idField,
+  responseField,
+  list,
+  add,
+  remove
+}) {
   const collectionPath = `/v1/vessels/{vesselId}/${path}`
   const itemPath = `${collectionPath}/{${idField}}`
+  const responseSchema = favouriteListResponseSchema(responseField)
 
   return [
     {
@@ -180,7 +210,9 @@ function buildFavouriteRoutes({ path, idField, list, add, remove }) {
       path: collectionPath,
       options: {
         auth: AUTH_STRATEGY,
-        validate: { params: vesselIdParamsSchema }
+        tags: ['api', 'Vessel Favourites'],
+        validate: { params: vesselIdParamsSchema },
+        response: { failAction: 'log', schema: responseSchema }
       },
       handler: buildListHandler(list)
     },
@@ -189,11 +221,13 @@ function buildFavouriteRoutes({ path, idField, list, add, remove }) {
       path: collectionPath,
       options: {
         auth: AUTH_STRATEGY,
+        tags: ['api', 'Vessel Favourites'],
         validate: {
           params: vesselIdParamsSchema,
           headers: idempotencyHeadersSchema,
           payload: favouritePayloadSchema(idField)
-        }
+        },
+        response: { failAction: 'log', schema: responseSchema }
       },
       handler: buildAddFavouriteHandler(add, idField)
     },
@@ -202,6 +236,7 @@ function buildFavouriteRoutes({ path, idField, list, add, remove }) {
       path: itemPath,
       options: {
         auth: AUTH_STRATEGY,
+        tags: ['api', 'Vessel Favourites'],
         validate: { params: favouriteIdParamsSchema(idField) }
       },
       handler: buildRemoveFavouriteHandler(remove, idField)
@@ -225,7 +260,9 @@ export const vesselProfiles = [
     path: '/v1/vessels/{vesselId}/skippers',
     options: {
       auth: AUTH_STRATEGY,
-      validate: { params: vesselIdParamsSchema }
+      tags: ['api', 'Vessel Skippers'],
+      validate: { params: vesselIdParamsSchema },
+      response: { failAction: 'log', schema: skippersResponseSchema }
     },
     handler: buildListHandler(listSkippers)
   },
@@ -234,11 +271,13 @@ export const vesselProfiles = [
     path: '/v1/vessels/{vesselId}/skippers',
     options: {
       auth: AUTH_STRATEGY,
+      tags: ['api', 'Vessel Skippers'],
       validate: {
         params: vesselIdParamsSchema,
         headers: idempotencyHeadersSchema,
         payload: skipperPayloadSchema
-      }
+      },
+      response: { failAction: 'log', schema: skippersResponseSchema }
     },
     handler: addSkipperHandler
   },
@@ -247,6 +286,7 @@ export const vesselProfiles = [
     path: '/v1/vessels/{vesselId}/skippers/{skipperId}',
     options: {
       auth: AUTH_STRATEGY,
+      tags: ['api', 'Vessel Skippers'],
       validate: { params: skipperIdParamsSchema }
     },
     handler: removeSkipperHandler

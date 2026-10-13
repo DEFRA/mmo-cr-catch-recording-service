@@ -14,6 +14,7 @@ Core delivery platform Node.js Backend Template.
   - [Formatting](#formatting)
     - [Windows prettier issue](#windows-prettier-issue)
 - [API endpoints](#api-endpoints)
+  - [OpenAPI documentation](#openapi-documentation)
 - [Development helpers](#development-helpers)
   - [MongoDB Locks](#mongodb-locks)
   - [Proxy](#proxy)
@@ -131,6 +132,44 @@ this service exposes (Catch Records, vessel favourites and skippers, platform he
 | `GET: /health`       | Health                         |
 | `GET: /example    `  | Example API (remove as needed) |
 | `GET: /example/<id>` | Example API (remove as needed) |
+
+### OpenAPI documentation
+
+Live, auto-generated API documentation is served directly by the running service via
+[`hapi-swagger`](https://github.com/hapi-swagger/hapi-swagger), built from the registered Hapi routes
+and their Joi request/response schemas — never a hand-maintained parallel document, so it can't drift
+out of step with the real routes.
+
+| Endpoint              | Description                                         |
+| :-------------------- | :-------------------------------------------------- |
+| `GET: /openapi.json`  | The machine-readable OpenAPI document.              |
+| `GET: /documentation` | Interactive Swagger UI, browsing the same document. |
+
+Both endpoints are public (no `authentication-service` bearer token required), matching the common
+convention of publishing an API contract for easy discovery/integration.
+
+**Important — this is OpenAPI 3.0.0, not 3.1.** `hapi-swagger` has no OpenAPI 3.1 mode: its own source
+hard-codes the generated document's `openapi` field to the literal `'3.0.0'`, and the
+[upstream project is archived](https://github.com/hapi-swagger/hapi-swagger) (read-only, no further
+releases). `OAS: 'v3.0'` (`src/plugins/api-documentation.js`) is the correct, verified option for this
+mode — the differently-named `openapi: '3.0.0'` option does not work and crashes the plugin.
+
+`hapi-swagger` also pins a `joi: 17.x` peer dependency; this repository uses `joi` 18, so
+`hapi-swagger`/`@hapi/inert`/`@hapi/vision` are installed with `--legacy-peer-deps`. This has been
+verified to work correctly for both request-schema introspection and the `response.schema` additions
+below.
+
+Every route carries a `tags: ['api', ...]` entry (required for `hapi-swagger` to include it at all) and,
+where the response is JSON, a `response: { schema: ..., failAction: 'log' }` entry purely for
+documentation — `failAction: 'log'` guarantees a schema/response mismatch is only ever logged, never
+changes the actual status, body, or headers a caller receives.
+
+**Known limitation:** `PATCH /v1/catch-records/{catchRecordId}`'s payload uses a `Joi.when()`
+conditional (`data` is an object for `trip`/`pairFishing`, an array for `gears`/`speciesNotLanded`).
+`hapi-swagger` cannot render this conditional accurately and shows a generic type instead — switching to
+a differently-structured Joi schema to improve the generated docs would weaken real request validation,
+so this is left as a documented gap (see that schema's own `.description()`) rather than "fixed" at the
+cost of behaviour.
 
 ## Development helpers
 

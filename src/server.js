@@ -1,4 +1,6 @@
 import Hapi from '@hapi/hapi'
+import Inert from '@hapi/inert'
+import Vision from '@hapi/vision'
 
 import { secureContext } from '@defra/hapi-secure-context'
 
@@ -7,6 +9,7 @@ import { router } from '#/plugins/router.js'
 import { requestLogger } from '#/plugins/request-logger.js'
 import { mongoDb } from '#/plugins/mongodb.js'
 import { errorMapping } from '#/plugins/error-mapping.js'
+import { apiDocumentation } from '#/plugins/api-documentation.js'
 import { authenticationPlugin } from '#/catch-recording/controller/authentication-plugin.js'
 import { referenceDataPlugin } from '#/catch-recording/controller/reference-data-plugin.js'
 import { catchArtifactPlugin } from '#/catch-recording/controller/catch-artifact-plugin.js'
@@ -55,6 +58,10 @@ export async function createServer() {
   //                        Service client (built once from config)
   // catchArtifactPlugin  - decorates `request.catchArtifactStore` with the Step 33 S3-compatible
   //                        CatchArtifact storage adapter (built once from config)
+  // inert / vision       - static-file/template-rendering prerequisites for hapi-swagger's
+  //                        documentation UI
+  // apiDocumentation     - Step 41: live OpenAPI 3.0 documentation (`GET /openapi.json`,
+  //                        `GET /documentation`), auto-generated from the registered routes
   // router              - routes used in the app
   await server.register([
     requestLogger,
@@ -67,6 +74,9 @@ export async function createServer() {
       options: config.get('mongo')
     },
     errorMapping,
+    Inert,
+    Vision,
+    apiDocumentation,
     {
       plugin: authenticationPlugin,
       options: {
