@@ -6,23 +6,27 @@ import {
 } from './reference-data-errors.js'
 import {
   isNonEmptyString,
-  isNullableString,
-  isNullableFiniteNumber,
+  isFiniteNumber,
   isPlainObject
 } from './response-validators.js'
 import { HTTP_STATUS_NOT_FOUND, isSuccessStatus } from './http-status.js'
 
 const BASE_PATH = '/api/v1/reference-data/map/statistical-areas'
+
+function isNonNegativeInteger(value) {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0
+}
+
 // Declarative field validators: reduces both the single-expression conditional-operator count and the
 // function's cyclomatic complexity compared with one large `||` chain, without changing behaviour.
+// Field names match the raw ArcGIS `StatisticalAreaProperties` contract this dataset is served as
+// (Step 42) - `OBJECTID`, `ICESNAME`, `sub_code`, `AREA_KM2` - never the camelCase shape used by every
+// other reference-data resource.
 const AREA_PROPERTY_VALIDATORS = Object.freeze([
-  ['id', isNonEmptyString],
-  ['code', isNonEmptyString],
-  ['name', isNonEmptyString],
-  ['areaType', isNonEmptyString],
-  ['parentCode', isNullableString],
-  ['parentName', isNullableString],
-  ['areaKm2', isNullableFiniteNumber]
+  ['OBJECTID', isNonNegativeInteger],
+  ['ICESNAME', isNonEmptyString],
+  ['sub_code', isNonEmptyString],
+  ['AREA_KM2', isFiniteNumber]
 ])
 
 function hasValidAreaProperties(properties) {
@@ -35,9 +39,15 @@ function hasValidAreaProperties(properties) {
  * Statistical areas have no active/inactive field in the confirmed Reference Data Service schema -
  * every returned item is treated as active, so no active-selection check applies to this type.
  *
+ * The upstream response is the raw ArcGIS export (Step 42): `OBJECTID`, `ICESNAME`, `sub_code`,
+ * `AREA_KM2`, plus several geometry-bound fields this client never reads. It carries no GUID, `code`, or
+ * `name` field. The client still returns the same `{ id, code, name, areaKm2, geometry }` shape every
+ * caller already expects, sourced from the nearest equivalent raw field (`OBJECTID` -> `id`, `sub_code`
+ * -> `code`, `ICESNAME` -> `name`, `AREA_KM2` -> `areaKm2`) - the former `areaType`/`parentCode`/
+ * `parentName`/`centroid` fields no longer exist upstream and are never read.
+ *
  * @param {unknown} body
- * @returns {{ id: string, code: string, name: string, areaType: string, parentCode: string|null,
- *   parentName: string|null, areaKm2: number|null, geometry: object } | null}
+ * @returns {{ id: string, code: string, name: string, areaKm2: number, geometry: object } | null}
  */
 function validateStatisticalAreaResponse(body) {
   if (!isPlainObject(body) || body.type !== 'Feature') {
@@ -50,27 +60,21 @@ function validateStatisticalAreaResponse(body) {
     return null
   }
 
-  const normalisedProperties = {
-    parentCode: null,
-    parentName: null,
-    areaKm2: null,
-    ...properties
-  }
-
-  if (!hasValidAreaProperties(normalisedProperties)) {
+  if (!hasValidAreaProperties(properties)) {
     return null
   }
 
-  const { id, code, name, areaType, parentCode, parentName, areaKm2 } =
-    normalisedProperties
+  const {
+    OBJECTID: objectId,
+    ICESNAME: icesName,
+    sub_code: subCode,
+    AREA_KM2: areaKm2
+  } = properties
 
   return Object.freeze({
-    id,
-    code,
-    name,
-    areaType,
-    parentCode,
-    parentName,
+    id: String(objectId),
+    code: subCode,
+    name: icesName,
     areaKm2,
     // Passed through opaquely - no current consumer parses or reinterprets geometry.
     geometry: Object.freeze({ ...geometry })

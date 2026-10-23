@@ -149,11 +149,17 @@ vesselLengthApplicability}]` array on the client's returned gear result — `cat
   (gear snapshots use only the gear's own code/name, never its category)), port (`id, code, name,
 countryCode, coordinate, active`), species (`id, faoCode, scientificName, commonNames[], localNames[],
 active`). **Statistical area** uses a GeoJSON `Feature`
-  shape, not the flat JSON item shape of the other three types: `{ type: 'Feature', id, properties: { id,
-code, name, areaType, parentCode?, parentName?, areaKm2?, centroid? }, geometry }` — only
-  `properties.id`/`code`/`name` are consumed by Step 15/16; `areaType`, `parentCode`, `parentName`,
-  `areaKm2`, `centroid`, and `geometry` are read-but-unused today (exposed on the client result only if a
-  future approved consumer needs them, never invented fields beyond what the schema above confirms).
+  shape, not the flat JSON item shape of the other three types. **Step 42 addendum (contract alignment):**
+  the confirmed Reference Data Service contract now serves this dataset as the raw, unchanged upstream
+  ArcGIS export — `{ type: 'Feature', properties: { OBJECTID, ICESNAME, sub_code, SOUTH, WEST, NORTH, EAST,
+AREA_KM2, Shape_Leng, Shape_Area, ... }, geometry }` (no `Feature.id`, no `properties.id/code/name/
+areaType/parentCode/parentName/centroid` — those fields no longer exist upstream). The path `{id}` is now
+  the raw ArcGIS integer `OBJECTID`, not a GUID. The client (`statistical-areas-client.js`) still returns
+  the same `{ id, code, name, areaKm2, geometry }` shape every caller already expects, sourced from the
+  nearest equivalent raw field: `OBJECTID` → `id` (stringified), `sub_code` → `code`, `ICESNAME` → `name`,
+  `AREA_KM2` → `areaKm2`. `geometry` is still read-but-unused (passed through opaquely); the former
+  `areaType`/`parentCode`/`parentName`/`centroid` fields are dropped entirely — they had no consumer and
+  no longer exist upstream.
 - **Service-to-service authentication**: `Authorization: Bearer <token>`, validated by the same
   Authentication Service `/validate` contract as Step 13. **Addendum (resolving the token-issuance gap
   flagged in the original research):** Catch Recording presents its **own** configured service
@@ -185,8 +191,9 @@ code, name, areaType, parentCode?, parentName?, areaKm2?, centroid? }, geometry 
   - Departure/return port → `codeSnapshot` ← `code`; `nameSnapshot` ← `name`.
   - Gear → `codeSnapshot` ← `code`; `nameSnapshot` ← `name`.
   - Gear characteristic → `nameSnapshot` ← `name`; `unitSnapshot` ← `unit`.
-  - Statistical area → `codeSnapshot` ← `properties.code`; `nameSnapshot` ← `properties.name` (read from
-    the GeoJSON Feature's `properties`, not root-level fields, per the confirmed schema).
+  - Statistical area → `codeSnapshot` ← `code`; `nameSnapshot` ← `name` (the client's own resolved result,
+    not the raw upstream field names — see the Step 42 addendum above: `code` is sourced from the raw
+    `properties.sub_code`, `name` from `properties.ICESNAME`).
   - Species → `faoCodeSnapshot` ← `faoCode`; `nameSnapshot` ← the first `commonNames[]` entry, falling
     back to `scientificName` when no common name is present (no mobile-view display-name resolver is used).
 - Historical snapshots already stored on a Catch Record are never rewritten merely because current

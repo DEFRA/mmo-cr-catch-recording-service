@@ -429,14 +429,27 @@ function gearNotFoundResponse() {
 }
 
 function statisticalAreaFeatureResponse({
-  id = 'area-2',
-  code = '46F45',
-  name = 'ICES 46F45'
+  objectId = 2,
+  subCode = '46F45',
+  icesName = 'ICES 46F45'
 } = {}) {
+  // Raw, unchanged upstream ArcGIS export shape (Step 42) - no `Feature.id`, no `properties.id/code/
+  // name/areaType`.
   return {
     type: 'Feature',
-    properties: { id, code, name, areaType: 'ICES' },
-    geometry: { type: 'Point', coordinates: [0, 0] }
+    properties: {
+      OBJECTID: objectId,
+      ICESNAME: icesName,
+      sub_code: subCode,
+      SOUTH: 45,
+      WEST: 4,
+      NORTH: 46,
+      EAST: 5,
+      AREA_KM2: 100,
+      Shape_Leng: 1,
+      Shape_Area: 1
+    },
+    geometry: { type: 'MultiPolygon', coordinates: [] }
   }
 }
 
@@ -1931,7 +1944,7 @@ function mockSubmissionReferenceData() {
     }
 
     if (url.includes('/reference-data/map/statistical-areas/area-1')) {
-      return JSON.stringify(statisticalAreaFeatureResponse({ id: 'area-1' }))
+      return JSON.stringify(statisticalAreaFeatureResponse())
     }
 
     if (url.includes('/reference-data/species/species-1')) {
