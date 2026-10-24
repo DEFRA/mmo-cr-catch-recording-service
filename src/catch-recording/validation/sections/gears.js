@@ -15,7 +15,7 @@ function isNonEmptyString(value) {
 
 // The two approved `weightPrecision` values (Step 27 redesign - service-owner decision). No other
 // value is approved; do not infer a third precision level.
-const WEIGHT_PRECISION_VALUES = ['wholeNumber', 'oneDecimalPlace']
+const WEIGHT_PRECISION_VALUES = new Set(['wholeNumber', 'oneDecimalPlace'])
 
 /**
  * Validates a gear association's `gear` selection: a missing/empty `gear.id` is `REQUIRED`; a `gear`
@@ -202,7 +202,7 @@ function validateSpeciesEntryFields(speciesEntry, pathSegments) {
   if (
     Object.hasOwn(speciesEntry, 'weightPrecision') &&
     speciesEntry.weightPrecision !== null &&
-    !WEIGHT_PRECISION_VALUES.includes(speciesEntry.weightPrecision)
+    !WEIGHT_PRECISION_VALUES.has(speciesEntry.weightPrecision)
   ) {
     issues.push(
       issue(
@@ -321,10 +321,12 @@ export function validateGears(gears) {
       seenGearAssociationIds.add(associationId)
     }
 
-    issues.push(...validateGearSelection(gearAssociation, gearIndex))
-    issues.push(...validateCharacteristics(gearAssociation, gearIndex))
-    issues.push(...validateStatisticalAreaSelection(gearAssociation, gearIndex))
-    issues.push(...validateSpeciesCaught(gearAssociation, gearIndex))
+    issues.push(
+      ...validateGearSelection(gearAssociation, gearIndex),
+      ...validateCharacteristics(gearAssociation, gearIndex),
+      ...validateStatisticalAreaSelection(gearAssociation, gearIndex),
+      ...validateSpeciesCaught(gearAssociation, gearIndex)
+    )
   })
 
   return issues.length === 0 ? createValidResult() : createInvalidResult(issues)

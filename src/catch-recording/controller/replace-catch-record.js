@@ -122,24 +122,29 @@ function applyTrustedBusinessDate(trip, businessTimezone) {
 async function resolveTripPorts(trip, referenceDataClient, correlationId) {
   const resolved = { ...trip }
   const issues = []
+  const fields = ['departurePort', 'returnPort']
 
-  for (const field of ['departurePort', 'returnPort']) {
-    const selection = trip[field]
+  const outcomes = await Promise.all(
+    fields.map((field) =>
+      resolvePort({
+        id: trip[field]?.id,
+        path: ['trip', field],
+        client: referenceDataClient,
+        correlationId
+      })
+    )
+  )
 
-    const { result, snapshot } = await resolvePort({
-      id: selection?.id,
-      path: ['trip', field],
-      client: referenceDataClient,
-      correlationId
-    })
+  fields.forEach((field, index) => {
+    const { result, snapshot } = outcomes[index]
 
     if (!result.valid) {
       issues.push(...result.issues)
-      continue
+      return
     }
 
-    resolved[field] = { id: selection.id, ...snapshot }
-  }
+    resolved[field] = { id: trip[field].id, ...snapshot }
+  })
 
   if (issues.length > 0) {
     throw replacementValidationError(issues)

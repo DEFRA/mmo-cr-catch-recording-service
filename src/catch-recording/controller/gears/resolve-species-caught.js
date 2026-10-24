@@ -47,24 +47,24 @@ export async function resolveSpeciesCaught({
   issues
 }) {
   const sourceEntries = Array.isArray(speciesCaught) ? speciesCaught : []
-  const resolved = []
+  const perEntryIssues = sourceEntries.map(() => [])
 
-  for (const [speciesIndex, speciesEntry] of sourceEntries.entries()) {
-    const resolvedEntry = await resolveOneSpeciesEntry({
-      speciesEntry,
-      gearIndex,
-      speciesIndex,
-      referenceDataClient,
-      correlationId,
-      issues
-    })
+  const resolvedEntries = await Promise.all(
+    sourceEntries.map((speciesEntry, speciesIndex) =>
+      resolveOneSpeciesEntry({
+        speciesEntry,
+        gearIndex,
+        speciesIndex,
+        referenceDataClient,
+        correlationId,
+        issues: perEntryIssues[speciesIndex]
+      })
+    )
+  )
 
-    if (resolvedEntry) {
-      resolved.push(resolvedEntry)
-    }
-  }
+  issues.push(...perEntryIssues.flat())
 
-  return resolved
+  return resolvedEntries.filter(Boolean)
 }
 
 async function resolveOneSpeciesEntry({

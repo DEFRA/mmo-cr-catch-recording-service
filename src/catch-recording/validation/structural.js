@@ -11,7 +11,7 @@ const FORBIDDEN_ARTIFACT_BODY_FIELDS = ['content', 'body', 'json', 'pdf']
 const INVALID_STRUCTURE_MESSAGE = 'Invalid structure'
 // The two approved `weightPrecision` values (Step 27 redesign - service-owner decision). No other
 // value is approved; do not infer a third precision level.
-const WEIGHT_PRECISION_VALUES = ['wholeNumber', 'oneDecimalPlace']
+const WEIGHT_PRECISION_VALUES = new Set(['wholeNumber', 'oneDecimalPlace'])
 // Root-level fields that must never appear on a Catch Record: landed species/statistical area always
 // belong to a gear association, never the root, and history is a separate append-only mechanism.
 // `speciesNotLanded` is the one approved exception (Step 27 redesign, service-owner decision): it is a
@@ -132,7 +132,7 @@ function validateSpeciesEntry(speciesEntry, pathSegments) {
   if (
     Object.hasOwn(speciesEntry, 'weightPrecision') &&
     speciesEntry.weightPrecision !== null &&
-    !WEIGHT_PRECISION_VALUES.includes(speciesEntry.weightPrecision)
+    !WEIGHT_PRECISION_VALUES.has(speciesEntry.weightPrecision)
   ) {
     issues.push(
       issue(

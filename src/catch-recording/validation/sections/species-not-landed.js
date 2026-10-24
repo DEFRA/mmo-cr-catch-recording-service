@@ -15,7 +15,7 @@ function isNonEmptyString(value) {
 
 // The two approved `weightPrecision` values (Step 27 redesign - service-owner decision). No other
 // value is approved; do not infer a third precision level.
-const WEIGHT_PRECISION_VALUES = ['wholeNumber', 'oneDecimalPlace']
+const WEIGHT_PRECISION_VALUES = new Set(['wholeNumber', 'oneDecimalPlace'])
 
 /**
  * Validates one `speciesNotLanded` entry's shape and fields: a required non-empty `id` (the species'
@@ -71,7 +71,7 @@ function validateSpeciesNotLandedEntryFields(speciesEntry, index) {
   if (
     Object.hasOwn(speciesEntry, 'weightPrecision') &&
     speciesEntry.weightPrecision !== null &&
-    !WEIGHT_PRECISION_VALUES.includes(speciesEntry.weightPrecision)
+    !WEIGHT_PRECISION_VALUES.has(speciesEntry.weightPrecision)
   ) {
     issues.push(
       issue(

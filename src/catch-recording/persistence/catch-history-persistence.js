@@ -1,18 +1,17 @@
-import {
-  getCatchHistoryCollection,
-  ensureCatchHistoryIndexes,
-  CATCH_HISTORY_COLLECTION
-} from './catch-history-collection.js'
+import { getCatchHistoryCollection } from './catch-history-collection.js'
 import { toHistoryDocument, toHistoryEvent } from './catch-history-mapper.js'
-import {
-  validateHistoryEventInput,
-  CATCH_HISTORY_EVENT_TYPES
-} from './catch-history-event.js'
+import { validateHistoryEventInput } from './catch-history-event.js'
 import { assertPlainString, assertSafeListLimit } from './persistence-guards.js'
 import {
   malformedHistoryDocumentError,
   unexpectedHistoryPersistenceError
 } from './catch-history-errors.js'
+
+export {
+  ensureCatchHistoryIndexes,
+  CATCH_HISTORY_COLLECTION
+} from './catch-history-collection.js'
+export { CATCH_HISTORY_EVENT_TYPES } from './catch-history-event.js'
 
 /**
  * The Catch Record history capability of `CatchPersistence` — one simple, append-only Catch Record
@@ -111,10 +110,4 @@ export async function listCatchHistoryEventsForOwner(
   }
 
   return documents.map((document) => mapStoredDocument(document))
-}
-
-export {
-  ensureCatchHistoryIndexes,
-  CATCH_HISTORY_COLLECTION,
-  CATCH_HISTORY_EVENT_TYPES
 }
