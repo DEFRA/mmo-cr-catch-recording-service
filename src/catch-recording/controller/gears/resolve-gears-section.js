@@ -50,28 +50,27 @@ export async function resolveGearsSection(
   correlationId
 ) {
   const gearAssociations = Array.isArray(normalisedGears) ? normalisedGears : []
-  const issues = []
-  const resolvedIncomingGears = []
+  const perAssociationIssues = gearAssociations.map(() => [])
 
-  for (const [index, gearAssociation] of gearAssociations.entries()) {
-    const resolvedEntry = await resolveOneGearAssociation({
-      gearAssociation,
-      index,
-      referenceDataClient,
-      correlationId,
-      issues
-    })
+  const resolvedEntries = await Promise.all(
+    gearAssociations.map((gearAssociation, index) =>
+      resolveOneGearAssociation({
+        gearAssociation,
+        index,
+        referenceDataClient,
+        correlationId,
+        issues: perAssociationIssues[index]
+      })
+    )
+  )
 
-    if (resolvedEntry) {
-      resolvedIncomingGears.push(resolvedEntry)
-    }
-  }
+  const issues = perAssociationIssues.flat()
 
   if (issues.length > 0) {
     throw sectionValidationError(issues)
   }
 
-  return resolvedIncomingGears
+  return resolvedEntries.filter(Boolean)
 }
 
 async function resolveOneGearAssociation({
@@ -225,6 +224,7 @@ function resolveCharacteristics({
     const { result: characteristicResult, snapshot: characteristicSnapshot } =
       resolveGearCharacteristic({
         characteristicId: characteristic?.characteristicId,
+        value: characteristic?.value,
         path: ['gears', index, 'characteristics', characteristicIndex],
         gear: resolvedGear
       })

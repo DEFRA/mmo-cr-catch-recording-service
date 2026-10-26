@@ -3,17 +3,19 @@ import { createGetStatisticalAreaById } from './statistical-areas-client.js'
 function validFeatureBody(overrides = {}) {
   return {
     type: 'Feature',
-    id: 'area-1',
     properties: {
-      id: 'area-1',
-      code: '46F45',
-      name: 'ICES 46F45',
-      areaType: 'ICES',
-      parentCode: null,
-      parentName: null,
-      areaKm2: 1234.5
+      OBJECTID: 101,
+      ICESNAME: '46F4',
+      sub_code: '46F45',
+      SOUTH: 45,
+      WEST: 4,
+      NORTH: 46,
+      EAST: 5,
+      AREA_KM2: 1234.5,
+      Shape_Leng: 10.1,
+      Shape_Area: 20.2
     },
-    geometry: { type: 'Polygon', coordinates: [] },
+    geometry: { type: 'MultiPolygon', coordinates: [] },
     ...overrides
   }
 }
@@ -32,11 +34,13 @@ describe('#createGetStatisticalAreaById', () => {
       httpClient
     })
 
-    const area = await getStatisticalAreaById('area-1')
+    const area = await getStatisticalAreaById('101')
 
+    expect(area.id).toBe('101')
     expect(area.code).toBe('46F45')
-    expect(area.name).toBe('ICES 46F45')
-    expect(area.geometry).toEqual({ type: 'Polygon', coordinates: [] })
+    expect(area.name).toBe('46F4')
+    expect(area.areaKm2).toBe(1234.5)
+    expect(area.geometry).toEqual({ type: 'MultiPolygon', coordinates: [] })
     expect(Object.isFrozen(area)).toBe(true)
   })
 
@@ -57,7 +61,7 @@ describe('#createGetStatisticalAreaById', () => {
     })
 
     try {
-      await getStatisticalAreaById('area-1')
+      await getStatisticalAreaById('101')
       throw new Error('expected getStatisticalAreaById to reject')
     } catch (error) {
       expect(error.category).toBe('UPSTREAM_INVALID_RESPONSE')
@@ -71,7 +75,7 @@ describe('#createGetStatisticalAreaById', () => {
     })
 
     try {
-      await getStatisticalAreaById('area-1')
+      await getStatisticalAreaById('101')
       throw new Error('expected getStatisticalAreaById to reject')
     } catch (error) {
       expect(error.category).toBe('RESOURCE_NOT_FOUND')
@@ -83,17 +87,46 @@ describe('#createGetStatisticalAreaById', () => {
     ['not a Feature', validFeatureBody({ type: 'FeatureCollection' })],
     ['missing properties', validFeatureBody({ properties: undefined })],
     [
-      'missing properties.code',
-      validFeatureBody({
-        properties: { id: 'area-1', name: 'x', areaType: 'ICES' }
-      })
+      'missing properties.OBJECTID',
+      {
+        ...validFeatureBody(),
+        properties: { ...validFeatureBody().properties, OBJECTID: undefined }
+      }
+    ],
+    [
+      'non-integer properties.OBJECTID',
+      {
+        ...validFeatureBody(),
+        properties: { ...validFeatureBody().properties, OBJECTID: 1.5 }
+      }
+    ],
+    [
+      'missing properties.sub_code',
+      {
+        ...validFeatureBody(),
+        properties: { ...validFeatureBody().properties, sub_code: undefined }
+      }
+    ],
+    [
+      'missing properties.ICESNAME',
+      {
+        ...validFeatureBody(),
+        properties: { ...validFeatureBody().properties, ICESNAME: undefined }
+      }
+    ],
+    [
+      'missing properties.AREA_KM2',
+      {
+        ...validFeatureBody(),
+        properties: { ...validFeatureBody().properties, AREA_KM2: undefined }
+      }
     ],
     ['missing geometry', validFeatureBody({ geometry: undefined })],
     [
-      'wrong-type areaKm2',
+      'wrong-type AREA_KM2',
       {
         ...validFeatureBody(),
-        properties: { ...validFeatureBody().properties, areaKm2: 'big' }
+        properties: { ...validFeatureBody().properties, AREA_KM2: 'big' }
       }
     ]
   ])('Should reject a malformed response: %s', async (_label, body) => {
@@ -103,7 +136,7 @@ describe('#createGetStatisticalAreaById', () => {
     })
 
     try {
-      await getStatisticalAreaById('area-1')
+      await getStatisticalAreaById('101')
       throw new Error('expected getStatisticalAreaById to reject')
     } catch (error) {
       expect(error.category).toBe('UPSTREAM_INVALID_RESPONSE')
@@ -119,7 +152,7 @@ describe('#createGetStatisticalAreaById', () => {
       httpClient
     })
 
-    const area = await getStatisticalAreaById('area-1')
+    const area = await getStatisticalAreaById('101')
 
     expect(area).not.toHaveProperty('active')
   })

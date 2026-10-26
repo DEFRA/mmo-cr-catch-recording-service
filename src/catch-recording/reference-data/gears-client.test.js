@@ -1,15 +1,15 @@
 import { createGetGearById } from './gears-client.js'
 
-function characteristicCatalog(overrides = []) {
+function measurementCatalog(overrides = []) {
   return [
     {
       id: 'char-1',
-      code: 'MESH',
-      name: 'Mesh Size',
-      dataType: 'number',
+      code: 'ME',
+      label: 'Mesh size',
+      kind: 'number',
       unit: 'mm',
-      minValue: 1,
-      maxValue: 200
+      minimumValue: 1,
+      maximumValue: 200
     },
     ...overrides
   ]
@@ -20,27 +20,19 @@ function gearItem(overrides = {}) {
     id: 'gear-1',
     code: 'TBB',
     name: 'Beam Trawl',
-    type: 'towed',
-    categoryId: 'category-1',
+    category: { id: 'category-1', code: 'TRAWL', name: 'Trawl nets' },
     pairFishing: false,
-    active: true,
-    applicableCharacteristics: [
-      {
-        id: 'applicable-1',
-        characteristicId: 'char-1',
-        fixed: true,
-        required: true
-      }
-    ],
+    requiredMeasurementIds: ['char-1'],
+    variableMeasurementIds: [],
     ...overrides
   }
 }
 
 function envelope({
   items = [gearItem()],
-  characteristics = characteristicCatalog()
+  measurements = measurementCatalog()
 } = {}) {
-  return { items, characteristics, categories: [] }
+  return { items, measurements }
 }
 
 function fakeHttpClient(response) {
@@ -48,32 +40,31 @@ function fakeHttpClient(response) {
 }
 
 describe('#createGetGearById', () => {
-  test('Should request the gear collection endpoint with an ids filter and includeInactive=true', async () => {
+  test('Should request the gear collection endpoint with ids, includeInactive=true and view=mobile', async () => {
     const httpClient = fakeHttpClient({ status: 200, body: envelope() })
     const getGearById = createGetGearById({ httpClient })
 
     await getGearById('gear-1', { correlationId: 'trace-1' })
 
     expect(httpClient.get).toHaveBeenCalledWith({
-      path: '/api/v1/reference-data/gears?ids=gear-1&includeInactive=true',
+      path: '/api/v1/reference-data/gears?ids=gear-1&includeInactive=true&view=mobile',
       correlationId: 'trace-1'
     })
   })
 
-  test('Should return the gear with characteristics resolved from the catalog', async () => {
+  test('Should return the gear with characteristics resolved from the measurements catalog', async () => {
     const httpClient = fakeHttpClient({ status: 200, body: envelope() })
     const getGearById = createGetGearById({ httpClient })
 
     const gear = await getGearById('gear-1')
 
     expect(gear.code).toBe('TBB')
+    expect(gear.pairFishing).toBe(false)
     expect(gear.characteristics).toEqual([
       {
         characteristicId: 'char-1',
-        fixed: true,
         required: true,
-        vesselLengthApplicability: [],
-        name: 'Mesh Size',
+        name: 'Mesh size',
         unit: 'mm',
         dataType: 'number',
         minValue: 1,
@@ -84,12 +75,31 @@ describe('#createGetGearById', () => {
     expect(Object.isFrozen(gear.characteristics)).toBe(true)
   })
 
+  test('Should mark a variable (non-required) measurement as required: false', async () => {
+    const httpClient = fakeHttpClient({
+      status: 200,
+      body: envelope({
+        items: [
+          gearItem({
+            requiredMeasurementIds: [],
+            variableMeasurementIds: ['char-1']
+          })
+        ]
+      })
+    })
+    const getGearById = createGetGearById({ httpClient })
+
+    const gear = await getGearById('gear-1')
+
+    expect(gear.characteristics[0].required).toBe(false)
+  })
+
   test('Should default optional catalog fields (unit/minValue/maxValue) to null when absent', async () => {
     const httpClient = fakeHttpClient({
       status: 200,
       body: envelope({
-        characteristics: [
-          { id: 'char-1', code: 'MESH', name: 'Mesh Size', dataType: 'number' }
+        measurements: [
+          { id: 'char-1', code: 'ME', label: 'Mesh size', kind: 'number' }
         ]
       })
     })
@@ -104,13 +114,14 @@ describe('#createGetGearById', () => {
     })
   })
 
-  test('Should not expose category data (categories[] is never consumed)', async () => {
+  test('Should not expose category data (category is never consumed)', async () => {
     const httpClient = fakeHttpClient({ status: 200, body: envelope() })
     const getGearById = createGetGearById({ httpClient })
 
     const gear = await getGearById('gear-1')
 
-    expect(gear).not.toHaveProperty('categories')
+    expect(gear).not.toHaveProperty('category')
+    expect(gear).not.toHaveProperty('active')
   })
 
   test('Should reject an invalid id without a network call', async () => {
@@ -151,10 +162,32 @@ describe('#createGetGearById', () => {
     }
   })
 
-  test('Should raise UPSTREAM_INVALID_RESPONSE when a characteristicId is not in the catalog', async () => {
+  test('Should raise UPSTREAM_INVALID_RESPONSE when a measurement id is not in the catalog', async () => {
     const httpClient = fakeHttpClient({
       status: 200,
-      body: envelope({ characteristics: [] })
+      body: envelope({ measurements: [] })
+    })
+    const getGearById = createGetGearById({ httpClient })
+
+    try {
+      await getGearById('gear-1')
+      throw new Error('expected getGearById to reject')
+    } catch (error) {
+      expect(error.category).toBe('UPSTREAM_INVALID_RESPONSE')
+    }
+  })
+
+  test('Should raise UPSTREAM_INVALID_RESPONSE when a measurement id appears in both required and variable lists', async () => {
+    const httpClient = fakeHttpClient({
+      status: 200,
+      body: envelope({
+        items: [
+          gearItem({
+            requiredMeasurementIds: ['char-1'],
+            variableMeasurementIds: ['char-1']
+          })
+        ]
+      })
     })
     const getGearById = createGetGearById({ httpClient })
 
@@ -181,36 +214,18 @@ describe('#createGetGearById', () => {
   test.each([
     ['missing root', null],
     ['non-array items', envelope({ items: 'x' })],
-    ['non-array characteristics', envelope({ characteristics: 'x' })],
+    ['non-array measurements', envelope({ measurements: 'x' })],
     [
       'invalid gear item',
       envelope({ items: [gearItem({ pairFishing: 'no' })] })
     ],
     ['non-object gear item', envelope({ items: ['not-an-object'] })],
     [
-      'invalid applicableCharacteristics entry',
-      envelope({
-        items: [
-          gearItem({
-            applicableCharacteristics: [{ id: 'x', characteristicId: 'char-1' }]
-          })
-        ]
-      })
+      'non-array requiredMeasurementIds',
+      envelope({ items: [gearItem({ requiredMeasurementIds: 'char-1' })] })
     ],
-    [
-      'non-object applicableCharacteristics entry',
-      envelope({
-        items: [gearItem({ applicableCharacteristics: ['not-an-object'] })]
-      })
-    ],
-    [
-      'invalid catalog entry',
-      envelope({ characteristics: [{ id: 'char-1' }] })
-    ],
-    [
-      'non-object catalog entry',
-      envelope({ characteristics: ['not-an-object'] })
-    ]
+    ['invalid catalog entry', envelope({ measurements: [{ id: 'char-1' }] })],
+    ['non-object catalog entry', envelope({ measurements: ['not-an-object'] })]
   ])('Should reject a malformed envelope: %s', async (_label, body) => {
     const httpClient = fakeHttpClient({ status: 200, body })
     const getGearById = createGetGearById({ httpClient })
@@ -221,37 +236,5 @@ describe('#createGetGearById', () => {
     } catch (error) {
       expect(error.category).toBe('UPSTREAM_INVALID_RESPONSE')
     }
-  })
-
-  test('Should preserve a supplied vesselLengthApplicability array without sharing the input reference', async () => {
-    const vesselLengthApplicability = ['under-10m']
-    const httpClient = fakeHttpClient({
-      status: 200,
-      body: envelope({
-        items: [
-          gearItem({
-            applicableCharacteristics: [
-              {
-                id: 'applicable-1',
-                characteristicId: 'char-1',
-                fixed: true,
-                required: true,
-                vesselLengthApplicability
-              }
-            ]
-          })
-        ]
-      })
-    })
-    const getGearById = createGetGearById({ httpClient })
-
-    const gear = await getGearById('gear-1')
-
-    expect(gear.characteristics[0].vesselLengthApplicability).toEqual([
-      'under-10m'
-    ])
-    expect(gear.characteristics[0].vesselLengthApplicability).not.toBe(
-      vesselLengthApplicability
-    )
   })
 })

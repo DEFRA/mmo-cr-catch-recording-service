@@ -17,5 +17,9 @@ export const VALIDATION_CODES = Object.freeze({
   /** An internal reference does not resolve to an existing association in the same Catch Record. */
   INVALID_REFERENCE: 'INVALID_REFERENCE',
   /** An approved conditional rule's dependent fields are inconsistent with their condition. */
-  CONDITIONAL_FIELD_INCONSISTENT: 'CONDITIONAL_FIELD_INCONSISTENT'
+  CONDITIONAL_FIELD_INCONSISTENT: 'CONDITIONAL_FIELD_INCONSISTENT',
+  /** A numeric value falls outside its resolved reference's approved minimum/maximum bounds (Step 43 —
+   * a gear characteristic's numeric `value`, defaulting to a `>= 0` floor when the Reference Data
+   * Service's own characteristic definition carries no `minValue`). */
+  VALUE_OUT_OF_RANGE: 'VALUE_OUT_OF_RANGE'
 })

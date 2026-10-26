@@ -148,11 +148,13 @@ function buildIdempotencyCollection() {
 function fakeReferenceDataClient({ accessibleVesselIds = [VESSEL_ID] } = {}) {
   return {
     listAccessibleVesselIds: vi.fn(async () => accessibleVesselIds),
+    // Gear active-selection is never checked (Step 43) - the Reference Data Service's mobile gear view
+    // carries no `active` field at all - so the resolved gear mock below carries none either.
     getGearById: vi.fn(async (id) => ({
       id,
       code: 'GN',
       name: 'Gillnet',
-      active: true
+      characteristics: []
     })),
     getSpeciesById: vi.fn(async (id) => ({
       id,
@@ -298,16 +300,31 @@ describe.each([
     test('add rejects an inactive/unknown reference as a business validation failure', async () => {
       const db = buildFakeDb()
       const referenceDataClient = fakeReferenceDataClient()
-      for (const method of ['getGearById', 'getSpeciesById', 'getPortById']) {
-        referenceDataClient[method] = vi.fn(async (id) => ({
-          id,
-          code: 'X',
-          name: 'X',
-          faoCode: 'X',
-          scientificName: 'X',
-          commonNames: [],
-          active: false
-        }))
+
+      if (idField === 'gearId') {
+        // Gear active-selection is never checked (Step 43 - the mobile gear view carries no `active`
+        // field at all), so an invalid gear is simulated here as not-found instead, exercising the same
+        // "add rejects an unknown reference" business-validation-failure outcome as species/port.
+        const { ApplicationError } =
+          await import('#/common/helpers/errors/application-error.js')
+        referenceDataClient.getGearById = vi.fn(async () => {
+          throw new ApplicationError({
+            category: 'RESOURCE_NOT_FOUND',
+            message: 'The selected gear could not be found.'
+          })
+        })
+      } else {
+        for (const method of ['getSpeciesById', 'getPortById']) {
+          referenceDataClient[method] = vi.fn(async (id) => ({
+            id,
+            code: 'X',
+            name: 'X',
+            faoCode: 'X',
+            scientificName: 'X',
+            commonNames: [],
+            active: false
+          }))
+        }
       }
 
       await expect(

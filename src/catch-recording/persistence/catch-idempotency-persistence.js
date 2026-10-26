@@ -1,8 +1,4 @@
-import {
-  getCatchIdempotencyCollection,
-  ensureCatchIdempotencyIndexes,
-  CATCH_IDEMPOTENCY_COLLECTION
-} from './catch-idempotency-collection.js'
+import { getCatchIdempotencyCollection } from './catch-idempotency-collection.js'
 import {
   assertPlainString,
   assertAllowedChanges
@@ -333,4 +329,7 @@ async function classifyCompletionMiss(
   )
 }
 
-export { ensureCatchIdempotencyIndexes, CATCH_IDEMPOTENCY_COLLECTION }
+export {
+  ensureCatchIdempotencyIndexes,
+  CATCH_IDEMPOTENCY_COLLECTION
+} from './catch-idempotency-collection.js'

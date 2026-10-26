@@ -1,8 +1,4 @@
-import {
-  getCatchRecordCollection,
-  ensureCatchRecordIndexes,
-  CATCH_RECORD_COLLECTION
-} from './catch-record-collection.js'
+import { getCatchRecordCollection } from './catch-record-collection.js'
 import {
   toPersistenceDocument,
   toCanonicalRecord
@@ -23,10 +19,7 @@ import {
   ineligibleReplacementError,
   ineligibleSectionUpdateError
 } from './catch-persistence-errors.js'
-import {
-  MIN_EXPECTED_VERSION,
-  validateExpectedVersion
-} from './expected-version.js'
+import { validateExpectedVersion } from './expected-version.js'
 import {
   PERSISTED_STATUSES,
   isPersistedStatus
@@ -598,8 +591,12 @@ async function classifyReplacementMiss(collection, { id, ownerUserId }) {
 
   throw versionConflictError()
 }
-export { ensureCatchRecordIndexes, CATCH_RECORD_COLLECTION }
-export { MIN_EXPECTED_VERSION, validateExpectedVersion }
+export {
+  ensureCatchRecordIndexes,
+  CATCH_RECORD_COLLECTION
+} from './catch-record-collection.js'
+export { MIN_EXPECTED_VERSION } from './expected-version.js'
+export { validateExpectedVersion }
 export {
   applySubmission,
   applyCompletion,

@@ -93,11 +93,28 @@ safe validation details.
 
 - **Collection limits** — no limit is approved/configured (`docs/configuration-decisions.md`); no
   collection-limit code or rule exists.
-- Gear-characteristic value/unit rules.
 - Cross-validation between `weightPrecision` and the actual decimal places of a supplied weight value —
   deliberately not approved; `weightPrecision` is a display hint only.
 - Gear ↔ statistical-area / gear ↔ species relationship checks at submission time — the recorded Step 16
-  gap (neither schema carries a gear-reference field); only existence/active-selection is revalidated.
+  gap (neither schema carries a gear-reference field); only existence/active-selection is revalidated
+  (gear's own active-selection check was itself subsequently removed — see Step 43 below).
+
+## Step 43: gear-characteristic numeric value range (confirmed product decision)
+
+A numeric gear-characteristic `value` (`resolveGearCharacteristic`, `reference-resolvers.js`) is now
+range-checked against the resolved characteristic's own `minValue`/`maxValue` (sourced from the Reference
+Data Service's mobile `measurements[]` catalog — `gears-client.js`): `value >= (minValue ?? 0)` and, when
+`maxValue` is defined, `value <= maxValue`. A non-numeric `value` (string/boolean — the exact type is
+still deferred) is never range-checked. A violation is a `VALUE_OUT_OF_RANGE` business-validation issue at
+the characteristic's `value` path, aggregated exactly like every other gear-resolution issue
+(`resolve-gears-section.js`). This supersedes the previous "Gear-characteristic value/unit rules" deferral
+above.
+
+Gear active-selection is also no longer checked (confirmed product decision, Step 43): the Reference Data
+Service's mobile gear view (`view=mobile`, now used exclusively by `getGearById` — the canonical view's
+collection envelope stopped reliably returning the `characteristics[]` catalog needed to resolve a gear's
+characteristics) carries no `active` field at all, unlike port/species. `resolveGear` resolves
+successfully regardless of any upstream active/inactive state (`isGearSelectable`, `active-selection.js`).
 
 ## Step 32: complete-validation (submission readiness)
 

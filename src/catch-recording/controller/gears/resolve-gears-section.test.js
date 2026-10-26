@@ -157,6 +157,26 @@ describe('#resolveGearsSection', () => {
     })
   })
 
+  test('aggregates a numeric characteristic value below the default 0 floor into BUSINESS_VALIDATION_FAILURE (Step 43)', async () => {
+    const client = fakeReferenceDataClient()
+
+    try {
+      await resolveGearsSection(
+        [
+          {
+            gear: { id: 'gear-1' },
+            characteristics: [{ characteristicId: 'char-1', value: -5 }]
+          }
+        ],
+        client
+      )
+      throw new Error('expected resolveGearsSection to reject')
+    } catch (error) {
+      expect(error.category).toBe('BUSINESS_VALIDATION_FAILURE')
+      expect(error.details[0].code).toBe('VALUE_OUT_OF_RANGE')
+    }
+  })
+
   test('aggregates every issue across the whole collection into one error', async () => {
     const client = fakeReferenceDataClient()
 

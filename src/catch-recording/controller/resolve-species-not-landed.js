@@ -37,28 +37,27 @@ export async function resolveSpeciesNotLandedSection(
   correlationId
 ) {
   const sourceEntries = Array.isArray(speciesNotLanded) ? speciesNotLanded : []
-  const issues = []
-  const resolved = []
+  const perEntryIssues = sourceEntries.map(() => [])
 
-  for (const [index, speciesEntry] of sourceEntries.entries()) {
-    const resolvedEntry = await resolveOneSpeciesEntry({
-      speciesEntry,
-      index,
-      referenceDataClient,
-      correlationId,
-      issues
-    })
+  const resolvedEntries = await Promise.all(
+    sourceEntries.map((speciesEntry, index) =>
+      resolveOneSpeciesEntry({
+        speciesEntry,
+        index,
+        referenceDataClient,
+        correlationId,
+        issues: perEntryIssues[index]
+      })
+    )
+  )
 
-    if (resolvedEntry) {
-      resolved.push(resolvedEntry)
-    }
-  }
+  const issues = perEntryIssues.flat()
 
   if (issues.length > 0) {
     throw sectionValidationError(issues)
   }
 
-  return resolved
+  return resolvedEntries.filter(Boolean)
 }
 
 async function resolveOneSpeciesEntry({

@@ -5,7 +5,7 @@ import {
   formatPath
 } from '#/catch-recording/validation/validation-result.js'
 import { VALIDATION_CODES } from '#/catch-recording/validation/validation-codes.js'
-import { isSelectable } from './active-selection.js'
+import { isSelectable, isGearSelectable } from './active-selection.js'
 import {
   mapPortSnapshot,
   mapGearSnapshot,
@@ -33,6 +33,14 @@ function malformedResult(path, message) {
 function invalidReferenceResult(path, message) {
   return createInvalidResult({
     code: VALIDATION_CODES.INVALID_REFERENCE,
+    path,
+    message
+  })
+}
+
+function outOfRangeResult(path, message) {
+  return createInvalidResult({
+    code: VALIDATION_CODES.VALUE_OUT_OF_RANGE,
     path,
     message
   })
@@ -171,10 +179,14 @@ export function resolveSpecies({ id, path, client, correlationId }) {
 
 /**
  * Resolves a gear selection. `resolved.characteristics` (already joined with the Reference Data
- * Service's characteristic catalogue by Step 15) is exposed in the return value so a caller validating a
- * selected gear characteristic can confirm it belongs to this gear (the one relationship the Reference
- * Data Service actually supports - see the Step 16 plan's "Recorded gap" for gear↔area/gear↔species,
- * which have no supporting field anywhere in the confirmed schemas).
+ * Service's characteristic catalogue by Step 15, now resolved from the mobile `measurements[]` view -
+ * Step 43) is exposed in the return value so a caller validating a selected gear characteristic can
+ * confirm it belongs to this gear (the one relationship the Reference Data Service actually supports -
+ * see the Step 16 plan's "Recorded gap" for gear↔area/gear↔species, which have no supporting field
+ * anywhere in the confirmed schemas).
+ *
+ * Gear active-selection is deliberately never checked (Step 43 confirmed product decision) - the
+ * Reference Data Service's mobile gear view carries no `active` field at all, unlike port/species.
  *
  * @param {{ id: unknown, path: Array<string|number>, client: object, correlationId?: string }} input
  */
@@ -184,22 +196,51 @@ export function resolveGear({ id, path, client, correlationId }) {
     path,
     resourceLabel: 'gear',
     fetchById: (gearId) => client.getGearById(gearId, { correlationId }),
-    isActive: isSelectable,
+    isActive: isGearSelectable,
     mapSnapshot: mapGearSnapshot
   })
 }
 
+/** Step 43's approved default numeric floor for a gear characteristic's `value` when the Reference Data
+ * Service's own characteristic definition carries no `minValue` - a negative measurement (mesh size,
+ * gear dimension, count, ...) is never meaningful absent an explicitly approved negative lower bound. */
+const DEFAULT_MIN_CHARACTERISTIC_VALUE = 0
+
+/**
+ * @param {number} value
+ * @param {{ minValue: number|null, maxValue: number|null }} characteristic
+ * @returns {boolean}
+ */
+function isCharacteristicValueOutOfRange(value, { minValue, maxValue }) {
+  const lowerBound = minValue ?? DEFAULT_MIN_CHARACTERISTIC_VALUE
+
+  if (value < lowerBound) {
+    return true
+  }
+
+  return maxValue !== null && maxValue !== undefined && value > maxValue
+}
+
 /**
  * Validates that a selected gear-characteristic ID belongs to the already-resolved gear (the one
- * relationship the Reference Data Service actually supports), then maps its snapshot. Takes the
- * `resolved` gear returned by a prior successful `resolveGear` call - it never re-fetches the gear
- * itself.
+ * relationship the Reference Data Service actually supports), then, for a numeric `value`, validates it
+ * against the resolved characteristic's approved range (Step 43: `>= minValue` - defaulting to `>= 0`
+ * when the Reference Data Service defines no `minValue` - and `<= maxValue` when defined). A non-numeric
+ * `value` (string/boolean - the exact type is still deferred, `normalization/sections/gears.js`) is never
+ * range-checked. Only then maps the resolved snapshot. Takes the `resolved` gear returned by a prior
+ * successful `resolveGear` call - it never re-fetches the gear itself.
  *
- * @param {{ characteristicId: unknown, path: Array<string|number>, gear: { characteristics: Array<{
- *   characteristicId: string }> } }} input
+ * @param {{ characteristicId: unknown, value?: unknown, path: Array<string|number>, gear: {
+ *   characteristics: Array<{ characteristicId: string, minValue: number|null, maxValue: number|null }>
+ *   } }} input
  * @returns {{ result: object, snapshot: object|null }}
  */
-export function resolveGearCharacteristic({ characteristicId, path, gear }) {
+export function resolveGearCharacteristic({
+  characteristicId,
+  value,
+  path,
+  gear
+}) {
   const idPath = formatPath([...path, 'characteristicId'])
 
   if (characteristicId === undefined || characteristicId === null) {
@@ -228,6 +269,20 @@ export function resolveGearCharacteristic({ characteristicId, path, gear }) {
       result: invalidReferenceResult(
         idPath,
         'The selected characteristic does not belong to this gear.'
+      ),
+      snapshot: null
+    }
+  }
+
+  if (
+    typeof value === 'number' &&
+    Number.isFinite(value) &&
+    isCharacteristicValueOutOfRange(value, match)
+  ) {
+    return {
+      result: outOfRangeResult(
+        formatPath([...path, 'value']),
+        'The supplied characteristic value is outside the approved range.'
       ),
       snapshot: null
     }
