@@ -11,7 +11,8 @@ describe('#VALIDATION_CODES', () => {
         'UNSUPPORTED_VALUE',
         'DUPLICATE_RELATIONSHIP',
         'INVALID_REFERENCE',
-        'CONDITIONAL_FIELD_INCONSISTENT'
+        'CONDITIONAL_FIELD_INCONSISTENT',
+        'VALUE_OUT_OF_RANGE'
       ].sort()
     )
   })

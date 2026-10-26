@@ -224,6 +224,7 @@ function resolveCharacteristics({
     const { result: characteristicResult, snapshot: characteristicSnapshot } =
       resolveGearCharacteristic({
         characteristicId: characteristic?.characteristicId,
+        value: characteristic?.value,
         path: ['gears', index, 'characteristics', characteristicIndex],
         gear: resolvedGear
       })

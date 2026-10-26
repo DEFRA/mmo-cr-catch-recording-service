@@ -1,7 +1,8 @@
 import {
   isVesselSelectable,
   isSelectable,
-  isStatisticalAreaSelectable
+  isStatisticalAreaSelectable,
+  isGearSelectable
 } from './active-selection.js'
 
 describe('#isVesselSelectable', () => {
@@ -36,5 +37,13 @@ describe('#isSelectable', () => {
 describe('#isStatisticalAreaSelectable', () => {
   test('Should always be true - no active field exists for this type', () => {
     expect(isStatisticalAreaSelectable()).toBe(true)
+  })
+})
+
+describe('#isGearSelectable', () => {
+  test('Should always be true - gear active-selection is no longer checked (Step 43)', () => {
+    expect(isGearSelectable()).toBe(true)
+    expect(isGearSelectable({ active: false })).toBe(true)
+    expect(isGearSelectable(undefined)).toBe(true)
   })
 })

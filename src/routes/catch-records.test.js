@@ -386,46 +386,39 @@ function eligibleDraftDocument(overrides = {}) {
 
 function gearCollectionResponse({
   gearId = 'gear-1',
-  characteristicId = 'char-1',
-  active = true
+  characteristicId = 'char-1'
 } = {}) {
+  // Mobile-view envelope (Step 43) - the canonical view's top-level `characteristics[]` catalog stopped
+  // reliably resolving, so `getGearById` now requests `view=mobile` exclusively. Gear active-selection
+  // is never checked (the mobile `GearMobileItem` schema carries no `active` field at all).
   return {
     items: [
       {
         id: gearId,
         code: 'GEAR001',
         name: 'Otter trawl',
-        type: 'trawl',
-        categoryId: 'cat-1',
+        category: { id: 'cat-1', code: 'TRAWL', name: 'Trawl nets' },
         pairFishing: false,
-        active,
-        applicableCharacteristics: [
-          {
-            id: 'applicable-1',
-            characteristicId,
-            fixed: false,
-            required: true,
-            vesselLengthApplicability: []
-          }
-        ]
+        requiredMeasurementIds: [characteristicId],
+        variableMeasurementIds: []
       }
     ],
-    characteristics: [
+    measurements: [
       {
         id: characteristicId,
-        code: 'MESH',
-        name: 'Mesh size',
-        dataType: 'number',
+        code: 'ME',
+        label: 'Mesh size',
+        kind: 'number',
         unit: 'mm',
-        minValue: 0,
-        maxValue: 300
+        minimumValue: 0,
+        maximumValue: 300
       }
     ]
   }
 }
 
 function gearNotFoundResponse() {
-  return { items: [], characteristics: [] }
+  return { items: [], measurements: [] }
 }
 
 function statisticalAreaFeatureResponse({

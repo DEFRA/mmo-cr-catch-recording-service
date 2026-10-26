@@ -120,8 +120,9 @@ its real (mocked) HTTP contract directly, mirroring the already-implemented clie
 
 - **Endpoints**: `GET /api/v1/reference-data/{vessels,ports,species}/{id}` for vessels/ports/species
   (self-contained item responses). **Gears use the collection endpoint with an `ids` filter instead of
-  the item endpoint** — `GET /api/v1/reference-data/gears?ids=<id>&includeInactive=true` — because a
-  gear's `applicableCharacteristics[].characteristicId` only resolves to a name/unit via the **collection
+  the item endpoint** — `GET /api/v1/reference-data/gears?ids=<id>&includeInactive=true&view=mobile`
+  (**Step 43 addendum**: `view=mobile` is now also sent — see below) — because a gear's
+  `applicableCharacteristics[].characteristicId` only resolves to a name/unit via the **collection
   envelope's** top-level `characteristics[]` catalog, which the item endpoint (`/gears/{id}`) does not
   return (confirmed directly from the Reference Data Service's own controller: the item handler returns
   only the matched gear, never the collection-level catalog). `includeInactive=true` is required on this
@@ -134,21 +135,31 @@ its real (mocked) HTTP contract directly, mirroring the already-implemented clie
   one stable ID the user already selected). No separate species-attributes endpoint exists or is called —
   species "attributes" are not a Reference Data Service concept at all (see below).
 - **Request contract**: canonical representation only — **no `view` query parameter is ever sent**
-  (no mobile view is used). Supported query parameters: `ids` (comma-separated GUIDs, max 50), per-dataset
-  exact filters, `includeInactive` (`true`/`false`, default `false`), `sort`, `offset`/`limit`
-  (default 50 / max 500). The statistical-area item endpoint takes no query parameters.
+  except for gears (**Step 43 addendum**: `getGearById` now sends `view=mobile` — see below). Supported
+  query parameters: `ids` (comma-separated GUIDs, max 50), per-dataset exact filters, `includeInactive`
+  (`true`/`false`, default `false`), `sort`, `offset`/`limit` (default 50 / max 500). The statistical-area
+  item endpoint takes no query parameters.
 - **Response contract**: the canonical collection-envelope schemas as implemented in
   `mmo-cr-reference-data-service` (`dataset, collectionId, schemaVersion, version, itemCount, items[]`),
   with dataset item shapes: vessel (`id, name, namePln, identifiers{cfr,uvi,mmsi,ircs,externalMark,
-registrationNumber}, lengthOverallMetres, status, activeFrom, activeTo`), gear (`id, code, name, type,
-categoryId, pairFishing, applicableCharacteristics[{id,characteristicId,fixed,required,
-vesselLengthApplicability?}], active`, joined by the client with the collection-level
-  `characteristics[{id,code,name,dataType,unit,minValue,maxValue}]` catalog into one resolved
-  `characteristics[{characteristicId,fixed,required,name,unit,dataType,minValue,maxValue,
-vesselLengthApplicability}]` array on the client's returned gear result — `categories[]` is not consumed
-  (gear snapshots use only the gear's own code/name, never its category)), port (`id, code, name,
+registrationNumber}, lengthOverallMetres, status, activeFrom, activeTo`), port (`id, code, name,
 countryCode, coordinate, active`), species (`id, faoCode, scientificName, commonNames[], localNames[],
-active`). **Statistical area** uses a GeoJSON `Feature`
+active`). **Gear (Step 43 addendum, superseding the original canonical-view description):** the
+  canonical collection's top-level `characteristics[]` catalog stopped reliably resolving a gear's
+  `applicableCharacteristics[].characteristicId` to a name/unit (confirmed empirically against the live
+  Reference Data Service — a canonical `ids=`-filtered request returns only the matched gear item, with
+  no `characteristics[]` catalog beside it, contradicting the documented contract). `getGearById` now
+  requests the collection's `view=mobile` representation instead: item shape `{id, code, name, category:
+{id,code,name}, pairFishing, requiredMeasurementIds[], variableMeasurementIds[]}`, joined by the client
+  with the collection-level `measurements[{id,code,label,kind,unit,minimumValue,maximumValue}]` catalog
+  into one resolved `characteristics[{characteristicId,required,name,unit,dataType,minValue,maxValue}]`
+  array on the client's returned gear result (`required` is `true` for an id in
+  `requiredMeasurementIds`, `false` for `variableMeasurementIds`; `name`←`label`, `dataType`←`kind`,
+  `minValue`←`minimumValue`, `maxValue`←`maximumValue`) — `category` is not consumed (gear snapshots use
+  only the gear's own code/name, never its category), mirroring the canonical view's unconsumed
+  `categories[]` before it. The mobile `GearMobileItem` schema carries no `active` field at all (unlike
+  vessel/port/species) and no equivalent of the former `fixed`/`vesselLengthApplicability` fields — both
+  are dropped; nothing downstream ever consumed them. **Statistical area** uses a GeoJSON `Feature`
   shape, not the flat JSON item shape of the other three types. **Step 42 addendum (contract alignment):**
   the confirmed Reference Data Service contract now serves this dataset as the raw, unchanged upstream
   ArcGIS export — `{ type: 'Feature', properties: { OBJECTID, ICESNAME, sub_code, SOUTH, WEST, NORTH, EAST,
@@ -178,24 +189,33 @@ areaType/parentCode/parentName/centroid` — those fields no longer exist upstre
 
 ### Reference validation and snapshot resolution (Step 16)
 
-- **Active-selection semantics**: vessel — `status === 'active'` (string field); gear/port/species — a
+- **Active-selection semantics**: vessel — `status === 'active'` (string field); port/species — a
   boolean `active` field. A collection query defaults to active-only (`includeInactive=false`); a direct
   item-by-ID lookup always returns the item regardless of active state, so a historical/inactive reference
   already stored on a Catch Record can still be validated and re-displayed. **Statistical area has no
   active/inactive field at all** in the confirmed Reference Data Service schema — every statistical area
   returned by the item endpoint is treated as active; no active-selection rule is applied to this type.
+  **Gear (Step 43 addendum):** active-selection is no longer checked at all (confirmed product decision)
+  — the mobile `GearMobileItem` schema carries no `active` field.
 - **Snapshot mapping** (canonical response field → approved `Snapshot` property in
-  `canonical-catch-record-object.md` — no mobile view is used):
+  `canonical-catch-record-object.md`):
   - Vessel → `rssSnapshot` ← `identifiers.registrationNumber`; `nameSnapshot` ← `name`;
     `externalMarkSnapshot` ← `identifiers.externalMark`; `lengthOverallMetresSnapshot` ← `lengthOverallMetres`.
   - Departure/return port → `codeSnapshot` ← `code`; `nameSnapshot` ← `name`.
   - Gear → `codeSnapshot` ← `code`; `nameSnapshot` ← `name`.
-  - Gear characteristic → `nameSnapshot` ← `name`; `unitSnapshot` ← `unit`.
+  - Gear characteristic → `nameSnapshot` ← `name` (**Step 43 addendum:** sourced from the mobile
+    `measurements[].label` field, not a `name` field — the mobile catalog has no `name` field at all);
+    `unitSnapshot` ← `unit`.
   - Statistical area → `codeSnapshot` ← `code`; `nameSnapshot` ← `name` (the client's own resolved result,
     not the raw upstream field names — see the Step 42 addendum above: `code` is sourced from the raw
     `properties.sub_code`, `name` from `properties.ICESNAME`).
   - Species → `faoCodeSnapshot` ← `faoCode`; `nameSnapshot` ← the first `commonNames[]` entry, falling
-    back to `scientificName` when no common name is present (no mobile-view display-name resolver is used).
+    back to `scientificName` when no common name is present (no mobile-view display-name resolver is used
+    for species).
+- **Gear-characteristic numeric value range (Step 43 addendum):** a numeric `value` is range-checked
+  against the resolved characteristic's own `minValue`/`maxValue` — `value >= (minValue ?? 0)` and, when
+  `maxValue` is defined, `value <= maxValue`. A non-numeric `value` is never range-checked. A violation is
+  a new `VALUE_OUT_OF_RANGE` validation code.
 - Historical snapshots already stored on a Catch Record are never rewritten merely because current
   reference data changed or became inactive.
 

@@ -18,101 +18,92 @@ const BASE_PATH = '/api/v1/reference-data/gears'
 
 // Declarative field validators: reduces both the single-expression conditional-operator count and each
 // function's cyclomatic complexity compared with one large `&&` chain, without changing behaviour.
-const APPLICABLE_CHARACTERISTIC_VALIDATORS = Object.freeze([
-  ['id', isNonEmptyString],
-  ['characteristicId', isNonEmptyString],
-  ['fixed', (value) => typeof value === 'boolean'],
-  ['required', (value) => typeof value === 'boolean'],
-  [
-    'vesselLengthApplicability',
-    (value) => isOptionalField(value, isStringArray)
-  ]
-])
-
-const GEAR_ITEM_VALIDATORS = Object.freeze([
+//
+// Step 43: the canonical (default) collection view's top-level `characteristics[]` catalog stopped
+// reliably resolving a gear's `applicableCharacteristics[].characteristicId` to a name/unit (confirmed
+// empirically against the live Reference Data Service - a canonical `ids=`-filtered request returns the
+// gear item alone, with no `characteristics[]` catalog beside it, contradicting the documented contract).
+// `getGearById` now requests `view=mobile` instead, whose `GearMobileItem`/`measurements[]` shape is used
+// exclusively - there is no fallback to the canonical shape. Per confirmed product decision, gear
+// active-selection is no longer checked (the mobile view carries no `active` field at all) - see
+// `active-selection.js`'s `isGearSelectable`.
+const GEAR_MOBILE_ITEM_VALIDATORS = Object.freeze([
   ['id', isNonEmptyString],
   ['code', isNonEmptyString],
   ['name', isNonEmptyString],
-  ['type', isNonEmptyString],
-  ['categoryId', isNonEmptyString],
   ['pairFishing', (value) => typeof value === 'boolean'],
-  ['active', (value) => typeof value === 'boolean']
+  ['requiredMeasurementIds', isStringArray],
+  ['variableMeasurementIds', isStringArray]
 ])
 
-const CHARACTERISTIC_CATALOG_VALIDATORS = Object.freeze([
+const MEASUREMENT_VALIDATORS = Object.freeze([
   ['id', isNonEmptyString],
   ['code', isNonEmptyString],
-  ['name', isNonEmptyString],
-  ['dataType', isNonEmptyString],
+  ['label', isNonEmptyString],
+  ['kind', isNonEmptyString],
   ['unit', (value) => isOptionalField(value, isNullableString)],
-  ['minValue', (value) => isOptionalField(value, isNullableFiniteNumber)],
-  ['maxValue', (value) => isOptionalField(value, isNullableFiniteNumber)]
+  ['minimumValue', (value) => isOptionalField(value, isNullableFiniteNumber)],
+  ['maximumValue', (value) => isOptionalField(value, isNullableFiniteNumber)]
 ])
 
 function matchesAllFields(entry, validators) {
   return validators.every(([field, validator]) => validator(entry[field]))
 }
 
-function isValidApplicableCharacteristic(entry) {
+function isValidGearMobileItem(entry) {
+  // `category` is deliberately never validated or exposed - it is required by the upstream schema but,
+  // exactly like the canonical view's `categories[]` before it, has no consumer anywhere in this
+  // service (gear snapshots use only the gear's own code/name, never its category).
   return (
-    isPlainObject(entry) &&
-    matchesAllFields(entry, APPLICABLE_CHARACTERISTIC_VALIDATORS)
+    isPlainObject(entry) && matchesAllFields(entry, GEAR_MOBILE_ITEM_VALIDATORS)
   )
 }
 
-function isValidGearItem(entry) {
-  if (!isPlainObject(entry) || !matchesAllFields(entry, GEAR_ITEM_VALIDATORS)) {
-    return false
-  }
-
-  return (
-    Array.isArray(entry.applicableCharacteristics) &&
-    entry.applicableCharacteristics.every((characteristic) =>
-      isValidApplicableCharacteristic(characteristic)
-    )
-  )
-}
-
-function isValidCharacteristicCatalogEntry(entry) {
-  return (
-    isPlainObject(entry) &&
-    matchesAllFields(entry, CHARACTERISTIC_CATALOG_VALIDATORS)
-  )
+function isValidMeasurement(entry) {
+  return isPlainObject(entry) && matchesAllFields(entry, MEASUREMENT_VALIDATORS)
 }
 
 /**
- * Joins one gear's `applicableCharacteristics` with the collection envelope's `characteristics[]`
- * catalog, producing one resolved, self-contained `characteristics[]` array. An
- * `applicableCharacteristics` entry referencing a `characteristicId` absent from the catalog is treated
- * as inconsistent upstream data (`UPSTREAM_INVALID_RESPONSE`), never silently dropped or repaired.
+ * Joins one mobile gear item's `requiredMeasurementIds`/`variableMeasurementIds` with the collection
+ * envelope's top-level `measurements[]` catalog, producing one resolved, self-contained
+ * `characteristics[]` array. A measurement id referenced by the item but absent from the catalog, or an
+ * id present in both id lists (an inconsistent required/variable classification), is treated as
+ * inconsistent upstream data (`UPSTREAM_INVALID_RESPONSE`), never silently dropped or repaired.
  *
- * @param {object} gearItem
- * @param {object[]} catalog
+ * @param {{ requiredMeasurementIds: string[], variableMeasurementIds: string[] }} gearItem
+ * @param {Map<string, object>} measurementsById
  * @returns {object[] | null}
  */
-function resolveCharacteristics(gearItem, catalog) {
-  const catalogById = new Map(catalog.map((entry) => [entry.id, entry]))
+function resolveCharacteristics(gearItem, measurementsById) {
+  const requiredIds = new Set(gearItem.requiredMeasurementIds)
+  const variableIds = new Set(gearItem.variableMeasurementIds)
+
+  const hasInconsistentClassification = gearItem.requiredMeasurementIds.some(
+    (id) => variableIds.has(id)
+  )
+  if (hasInconsistentClassification) {
+    return null
+  }
 
   const resolved = []
-  for (const applicable of gearItem.applicableCharacteristics) {
-    const definition = catalogById.get(applicable.characteristicId)
+  for (const measurementId of [
+    ...gearItem.requiredMeasurementIds,
+    ...gearItem.variableMeasurementIds
+  ]) {
+    const definition = measurementsById.get(measurementId)
     if (!definition) {
       return null
     }
 
     resolved.push(
       Object.freeze({
-        characteristicId: applicable.characteristicId,
-        fixed: applicable.fixed,
-        required: applicable.required,
-        vesselLengthApplicability: Object.freeze([
-          ...(applicable.vesselLengthApplicability ?? [])
-        ]),
-        name: definition.name,
+        characteristicId: measurementId,
+        required: requiredIds.has(measurementId),
+        name: definition.label,
         unit: definition.unit ?? null,
-        dataType: definition.dataType,
-        minValue: definition.minValue ?? null,
-        maxValue: definition.maxValue ?? null
+        dataType: definition.kind,
+        minValue: definition.minimumValue ?? null,
+        maxValue: definition.maximumValue ?? null
       })
     )
   }
@@ -121,8 +112,9 @@ function resolveCharacteristics(gearItem, catalog) {
 }
 
 /**
- * Validates the full collection envelope returned by the `ids`-filtered gear collection request, then
- * resolves exactly the one matching gear's characteristics against the top-level catalog.
+ * Validates the full mobile-view collection envelope returned by the `ids`-filtered gear collection
+ * request, then resolves exactly the one matching gear's characteristics against the top-level
+ * `measurements[]` catalog.
  *
  * @param {unknown} body
  * @returns {object | null} the resolved gear, or `null` for a malformed envelope
@@ -132,13 +124,13 @@ function validateAndResolveGearResponse(body) {
     return null
   }
 
-  const { items, characteristics } = body
+  const { items, measurements } = body
 
   if (
     !Array.isArray(items) ||
-    !items.every((item) => isValidGearItem(item)) ||
-    !Array.isArray(characteristics) ||
-    !characteristics.every((entry) => isValidCharacteristicCatalogEntry(entry))
+    !items.every((item) => isValidGearMobileItem(item)) ||
+    !Array.isArray(measurements) ||
+    !measurements.every((entry) => isValidMeasurement(entry))
   ) {
     return null
   }
@@ -149,9 +141,12 @@ function validateAndResolveGearResponse(body) {
   }
 
   const [gearItem] = items
+  const measurementsById = new Map(
+    measurements.map((entry) => [entry.id, entry])
+  )
   const resolvedCharacteristics = resolveCharacteristics(
     gearItem,
-    characteristics
+    measurementsById
   )
   if (!resolvedCharacteristics) {
     return null
@@ -161,10 +156,7 @@ function validateAndResolveGearResponse(body) {
     id: gearItem.id,
     code: gearItem.code,
     name: gearItem.name,
-    type: gearItem.type,
-    categoryId: gearItem.categoryId,
     pairFishing: gearItem.pairFishing,
-    active: gearItem.active,
     characteristics: Object.freeze(resolvedCharacteristics)
   })
 }
@@ -179,7 +171,7 @@ export function createGetGearById({ httpClient }) {
       throw invalidReferenceRequestError('A valid gear id is required.')
     }
 
-    const query = `ids=${encodeURIComponent(id)}&includeInactive=true`
+    const query = `ids=${encodeURIComponent(id)}&includeInactive=true&view=mobile`
     const { status, body } = await httpClient.get({
       path: `${BASE_PATH}?${query}`,
       correlationId

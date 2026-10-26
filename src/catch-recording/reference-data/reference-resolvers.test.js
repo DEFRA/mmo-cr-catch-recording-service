@@ -119,12 +119,11 @@ describe('#resolvePort', () => {
 })
 
 describe('#resolveGear', () => {
-  test('Should resolve an active gear with its snapshot and expose resolved.characteristics', async () => {
+  test('Should resolve a gear with its snapshot and expose resolved.characteristics, regardless of active state', async () => {
     const gear = {
       id: 'gear-1',
       code: 'TBB',
       name: 'Beam Trawl',
-      active: true,
       characteristics: [{ characteristicId: 'char-1', name: 'Mesh Size' }]
     }
     const client = { getGearById: vi.fn().mockResolvedValue(gear) }
@@ -141,6 +140,25 @@ describe('#resolveGear', () => {
       nameSnapshot: 'Beam Trawl'
     })
     expect(resolved.characteristics).toHaveLength(1)
+  })
+
+  test('Should resolve successfully even when the upstream gear carries active: false - gear active-selection is never checked (Step 43)', async () => {
+    const gear = {
+      id: 'gear-1',
+      code: 'TBB',
+      name: 'Beam Trawl',
+      active: false,
+      characteristics: []
+    }
+    const client = { getGearById: vi.fn().mockResolvedValue(gear) }
+
+    const { result } = await resolveGear({
+      id: 'gear-1',
+      path: ['gears', 0, 'gear'],
+      client
+    })
+
+    expect(result.valid).toBe(true)
   })
 })
 
@@ -269,5 +287,172 @@ describe('#resolveGearCharacteristic', () => {
     })
 
     expect(result.valid).toBe(false)
+  })
+})
+
+describe('#resolveGearCharacteristic value range (Step 43)', () => {
+  test('Should resolve a numeric value at or above the default 0 floor when no minValue/maxValue is defined', () => {
+    const gear = {
+      characteristics: [
+        {
+          characteristicId: 'char-1',
+          name: 'Mesh Size',
+          unit: 'mm',
+          minValue: null,
+          maxValue: null
+        }
+      ]
+    }
+
+    const { result } = resolveGearCharacteristic({
+      characteristicId: 'char-1',
+      value: 0,
+      path: ['gears', 0, 'characteristics', 0],
+      gear
+    })
+
+    expect(result.valid).toBe(true)
+  })
+
+  test('Should deny a negative numeric value when no minValue is defined (default 0 floor)', () => {
+    const gear = {
+      characteristics: [
+        {
+          characteristicId: 'char-1',
+          name: 'Mesh Size',
+          unit: 'mm',
+          minValue: null,
+          maxValue: null
+        }
+      ]
+    }
+
+    const { result } = resolveGearCharacteristic({
+      characteristicId: 'char-1',
+      value: -1,
+      path: ['gears', 0, 'characteristics', 0],
+      gear
+    })
+
+    expect(result.valid).toBe(false)
+    expect(result.issues[0].code).toBe('VALUE_OUT_OF_RANGE')
+    expect(result.issues[0].path).toBe('gears.0.characteristics.0.value')
+  })
+
+  test('Should deny a value below an explicit minValue', () => {
+    const gear = {
+      characteristics: [
+        {
+          characteristicId: 'char-1',
+          name: 'Mesh Size',
+          unit: 'mm',
+          minValue: 10,
+          maxValue: 200
+        }
+      ]
+    }
+
+    const { result } = resolveGearCharacteristic({
+      characteristicId: 'char-1',
+      value: 5,
+      path: ['gears', 0, 'characteristics', 0],
+      gear
+    })
+
+    expect(result.valid).toBe(false)
+    expect(result.issues[0].code).toBe('VALUE_OUT_OF_RANGE')
+  })
+
+  test('Should deny a value above an explicit maxValue', () => {
+    const gear = {
+      characteristics: [
+        {
+          characteristicId: 'char-1',
+          name: 'Mesh Size',
+          unit: 'mm',
+          minValue: 10,
+          maxValue: 200
+        }
+      ]
+    }
+
+    const { result } = resolveGearCharacteristic({
+      characteristicId: 'char-1',
+      value: 201,
+      path: ['gears', 0, 'characteristics', 0],
+      gear
+    })
+
+    expect(result.valid).toBe(false)
+    expect(result.issues[0].code).toBe('VALUE_OUT_OF_RANGE')
+  })
+
+  test('Should resolve a value within an explicit minValue/maxValue range', () => {
+    const gear = {
+      characteristics: [
+        {
+          characteristicId: 'char-1',
+          name: 'Mesh Size',
+          unit: 'mm',
+          minValue: 10,
+          maxValue: 200
+        }
+      ]
+    }
+
+    const { result, snapshot } = resolveGearCharacteristic({
+      characteristicId: 'char-1',
+      value: 80,
+      path: ['gears', 0, 'characteristics', 0],
+      gear
+    })
+
+    expect(result.valid).toBe(true)
+    expect(snapshot).toEqual({ nameSnapshot: 'Mesh Size', unitSnapshot: 'mm' })
+  })
+
+  test('Should never range-check a non-numeric value', () => {
+    const gear = {
+      characteristics: [
+        {
+          characteristicId: 'char-1',
+          name: 'Mesh Size',
+          unit: 'mm',
+          minValue: 10,
+          maxValue: 200
+        }
+      ]
+    }
+
+    const { result } = resolveGearCharacteristic({
+      characteristicId: 'char-1',
+      value: 'not-a-number',
+      path: ['gears', 0, 'characteristics', 0],
+      gear
+    })
+
+    expect(result.valid).toBe(true)
+  })
+
+  test('Should not range-check an absent value', () => {
+    const gear = {
+      characteristics: [
+        {
+          characteristicId: 'char-1',
+          name: 'Mesh Size',
+          unit: 'mm',
+          minValue: 10,
+          maxValue: 200
+        }
+      ]
+    }
+
+    const { result } = resolveGearCharacteristic({
+      characteristicId: 'char-1',
+      path: ['gears', 0, 'characteristics', 0],
+      gear
+    })
+
+    expect(result.valid).toBe(true)
   })
 })
