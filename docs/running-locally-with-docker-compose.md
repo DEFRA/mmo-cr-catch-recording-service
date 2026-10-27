@@ -142,7 +142,9 @@ Source: `src/routes/catch-records.js`. Full contracts:
 
 ```bash
 # Create the first persistent DRAFT Catch Record for a vessel.
-# Payload: { "vesselId": string, required }. Idempotency-Key header is optional.
+# Payload: { "vesselId": string, required; "catchRecordReference": string, optional }.
+# catchRecordReference, if supplied, must match the approved GBR-{RSS}-{DDMMYY}-{HHMMSS} format and be
+# unique - omit it to let the service generate one. Idempotency-Key header is optional.
 curl -i -X POST "$CR_URL/v1/catch-records" \
   -H "Authorization: $TOKEN" \
   -H "Content-Type: application/json" \

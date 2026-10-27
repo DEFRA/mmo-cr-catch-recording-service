@@ -30,6 +30,24 @@ const COUNTRY_PREFIX = 'GBR'
 const NON_ALPHANUMERIC_PATTERN = /[^A-Z0-9]/g
 
 /**
+ * The approved `GBR-{RSS}-{DDMMYY}-{HHMMSS}` format this module generates, expressed as a reusable
+ * pattern so a client-supplied reference (Step 43) can be validated against the exact same shape rather
+ * than a duplicated definition.
+ */
+export const CATCH_RECORD_REFERENCE_PATTERN = /^GBR-[A-Z0-9]+-\d{6}-\d{6}$/
+
+/**
+ * Checks whether `value` matches the approved `CATCH_RECORD_REFERENCE_PATTERN` format. Pure format
+ * validation only - never checks uniqueness, which remains a persistence-backed concern.
+ *
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+export function isValidCatchRecordReferenceFormat(value) {
+  return typeof value === 'string' && CATCH_RECORD_REFERENCE_PATTERN.test(value)
+}
+
+/**
  * Approved RSS normalisation: uppercase, then strip every whitespace and non-alphanumeric character.
  * Rejects anything that is not a non-empty string, and rejects a value that normalises to nothing (for
  * example a string of only punctuation/whitespace) - both are treated as a missing/malformed vessel RSS,

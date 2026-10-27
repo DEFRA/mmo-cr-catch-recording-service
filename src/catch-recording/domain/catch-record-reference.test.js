@@ -2,6 +2,8 @@ import {
   normaliseVesselRss,
   formatBusinessDateTime,
   generateCatchRecordReference,
+  isValidCatchRecordReferenceFormat,
+  CATCH_RECORD_REFERENCE_PATTERN,
   MAX_REFERENCE_GENERATION_ATTEMPTS
 } from './catch-record-reference.js'
 import { isApplicationError } from '#/common/helpers/errors/application-error.js'
@@ -175,4 +177,44 @@ describe('#generateCatchRecordReference', () => {
   test('exports the approved bounded attempt ceiling', () => {
     expect(MAX_REFERENCE_GENERATION_ATTEMPTS).toBe(5)
   })
+})
+
+describe('#isValidCatchRecordReferenceFormat', () => {
+  test('accepts a reference matching the approved GBR-{RSS}-{DDMMYY}-{HHMMSS} format', () => {
+    expect(
+      isValidCatchRecordReferenceFormat('GBR-RSS123456-150126-093045')
+    ).toBe(true)
+  })
+
+  test('matches exactly what the generator itself produces', async () => {
+    const reference = await generateCatchRecordReference({
+      rss: 'ab123xy',
+      timezone: 'Europe/London',
+      now: () => new Date('2026-01-15T09:30:45Z'),
+      referenceExists: async () => false
+    })
+
+    expect(isValidCatchRecordReferenceFormat(reference)).toBe(true)
+    expect(CATCH_RECORD_REFERENCE_PATTERN.test(reference)).toBe(true)
+  })
+
+  test.each([
+    'gbr-rss123456-150126-093045', // lowercase prefix
+    'GBR-150126-093045', // missing RSS segment
+    'GBR-RSS 123-150126-093045', // RSS contains disallowed whitespace
+    'GBR-RSS123456-15012-093045', // date part too short
+    'GBR-RSS123456-150126-93045', // time part too short
+    'GBR-RSS123456-150126-093045-extra', // trailing segment
+    '',
+    'not-a-reference'
+  ])('rejects a malformed reference (%p)', (value) => {
+    expect(isValidCatchRecordReferenceFormat(value)).toBe(false)
+  })
+
+  test.each([undefined, null, 123, {}, []])(
+    'rejects a non-string value (%p)',
+    (value) => {
+      expect(isValidCatchRecordReferenceFormat(value)).toBe(false)
+    }
+  )
 })
