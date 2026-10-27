@@ -262,4 +262,130 @@ describe('#createDraftCatchRecord', () => {
       })
     ).rejects.toMatchObject({ category: 'IDEMPOTENCY_CONFLICT' })
   })
+
+  test('persists a valid client-supplied catchRecordReference as-is', async () => {
+    const db = buildFakeDb()
+    const suppliedReference = 'GBR-RSS123456-150126-093045'
+
+    const response = await createDraftCatchRecord({
+      db,
+      referenceDataClient: fakeReferenceDataClient(),
+      authenticationContext: authenticationContext(),
+      vesselId: VESSEL_ID,
+      catchRecordReference: suppliedReference,
+      businessTimezone: 'Europe/London'
+    })
+
+    expect(response.catchRecordReference).toBe(suppliedReference)
+
+    const stored = db.collections['catch-records'].insertOne.mock.calls[0][0]
+    expect(stored.catchRecordReference).toBe(suppliedReference)
+  })
+
+  test('rejects a malformed client-supplied catchRecordReference before creating anything', async () => {
+    const db = buildFakeDb()
+
+    await expect(
+      createDraftCatchRecord({
+        db,
+        referenceDataClient: fakeReferenceDataClient(),
+        authenticationContext: authenticationContext(),
+        vesselId: VESSEL_ID,
+        catchRecordReference: 'not-a-valid-reference',
+        businessTimezone: 'Europe/London'
+      })
+    ).rejects.toMatchObject({
+      category: 'INVALID_REQUEST',
+      code: 'CATCH_RECORD_REFERENCE_INVALID_FORMAT'
+    })
+
+    expect(db.collections['catch-records'].insertOne).not.toHaveBeenCalled()
+  })
+
+  test('rejects a client-supplied catchRecordReference that already exists', async () => {
+    const db = buildFakeDb()
+    const existingReference = 'GBR-RSS123456-150126-093045'
+
+    await createDraftCatchRecord({
+      db,
+      referenceDataClient: fakeReferenceDataClient(),
+      authenticationContext: authenticationContext(),
+      vesselId: VESSEL_ID,
+      catchRecordReference: existingReference,
+      businessTimezone: 'Europe/London'
+    })
+
+    await expect(
+      createDraftCatchRecord({
+        db,
+        referenceDataClient: fakeReferenceDataClient(),
+        authenticationContext: authenticationContext(),
+        vesselId: VESSEL_ID,
+        catchRecordReference: existingReference,
+        businessTimezone: 'Europe/London'
+      })
+    ).rejects.toMatchObject({
+      category: 'DUPLICATE_RESOURCE',
+      code: 'DUPLICATE_CATCH_RECORD_REFERENCE'
+    })
+
+    expect(db.collections['catch-records'].insertOne).toHaveBeenCalledTimes(1)
+  })
+
+  test('rejects a reused idempotency key when the supplied reference differs', async () => {
+    const db = buildFakeDb()
+    const referenceDataClient = fakeReferenceDataClient()
+
+    await createDraftCatchRecord({
+      db,
+      referenceDataClient,
+      authenticationContext: authenticationContext(),
+      vesselId: VESSEL_ID,
+      catchRecordReference: 'GBR-RSS123456-150126-093045',
+      idempotencyKey: 'key-1',
+      businessTimezone: 'Europe/London'
+    })
+
+    await expect(
+      createDraftCatchRecord({
+        db,
+        referenceDataClient,
+        authenticationContext: authenticationContext(),
+        vesselId: VESSEL_ID,
+        catchRecordReference: 'GBR-RSS999999-150126-093045',
+        idempotencyKey: 'key-1',
+        businessTimezone: 'Europe/London'
+      })
+    ).rejects.toMatchObject({ category: 'IDEMPOTENCY_CONFLICT' })
+  })
+
+  test('replays the same result for a repeated request with the same supplied reference', async () => {
+    const db = buildFakeDb()
+    const referenceDataClient = fakeReferenceDataClient()
+    const suppliedReference = 'GBR-RSS123456-150126-093045'
+
+    const first = await createDraftCatchRecord({
+      db,
+      referenceDataClient,
+      authenticationContext: authenticationContext(),
+      vesselId: VESSEL_ID,
+      catchRecordReference: suppliedReference,
+      idempotencyKey: 'key-1',
+      businessTimezone: 'Europe/London'
+    })
+
+    const second = await createDraftCatchRecord({
+      db,
+      referenceDataClient,
+      authenticationContext: authenticationContext(),
+      vesselId: VESSEL_ID,
+      catchRecordReference: suppliedReference,
+      idempotencyKey: 'key-1',
+      businessTimezone: 'Europe/London'
+    })
+
+    expect(second.id).toBe(first.id)
+    expect(second.catchRecordReference).toBe(suppliedReference)
+    expect(db.collections['catch-records'].insertOne).toHaveBeenCalledTimes(1)
+  })
 })

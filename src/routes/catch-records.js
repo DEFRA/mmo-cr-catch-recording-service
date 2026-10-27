@@ -19,6 +19,7 @@ import { completeCatchRecord } from '#/catch-recording/controller/complete-catch
 import { startCatchRecordEdit } from '#/catch-recording/controller/start-catch-record-edit.js'
 import { MAX_IDEMPOTENCY_KEY_LENGTH } from '#/catch-recording/persistence/idempotency-key.js'
 import { PERSISTED_STATUSES } from '#/catch-recording/domain/lifecycle-status.js'
+import { CATCH_RECORD_REFERENCE_PATTERN } from '#/catch-recording/domain/catch-record-reference.js'
 import { PUBLIC_ARTIFACT_TYPES } from '#/catch-recording/artifact/artifact-keys.js'
 
 const AUTH_STRATEGY = 'authentication-service'
@@ -69,7 +70,14 @@ const createDraftHeadersSchema = Joi.object({
 }).unknown(true)
 
 const createDraftPayloadSchema = Joi.object({
-  vesselId: Joi.string().trim().min(1).required()
+  vesselId: Joi.string().trim().min(1).required(),
+  // Step 43: optional client-supplied friendly reference. Format-validated here against the exact same
+  // pattern the service's own generator produces; uniqueness is a persistence-backed concern handled by
+  // the controller, not expressible in a Joi schema.
+  catchRecordReference: Joi.string()
+    .trim()
+    .pattern(CATCH_RECORD_REFERENCE_PATTERN)
+    .optional()
 }).required()
 
 async function createDraftCatchRecordHandler(request, h) {
@@ -78,6 +86,7 @@ async function createDraftCatchRecordHandler(request, h) {
     referenceDataClient: request.referenceDataClient,
     authenticationContext: request.auth.credentials,
     vesselId: request.payload?.vesselId,
+    catchRecordReference: request.payload?.catchRecordReference,
     idempotencyKey: request.headers['idempotency-key'],
     businessTimezone: config.get('businessTimezone'),
     correlationId: getTraceId()

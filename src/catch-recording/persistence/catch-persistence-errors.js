@@ -18,6 +18,25 @@ function duplicateKeyPattern(error) {
 }
 
 /**
+ * Builds the safe, deterministic `ApplicationError` for a duplicate friendly Catch Record reference.
+ * Shared by `translateInsertError` (the DB-level race-safety-net path, where `cause` is the raw driver
+ * error) and Step 43's client-supplied-reference pre-check in the create-draft controller (a
+ * deterministic business-outcome branch, so no `cause` is supplied) — kept in one place so both paths
+ * return an identical category/code/message.
+ *
+ * @param {unknown} [cause]
+ * @returns {ApplicationError}
+ */
+export function duplicateCatchRecordReferenceError(cause) {
+  return new ApplicationError({
+    category: 'DUPLICATE_RESOURCE',
+    code: 'DUPLICATE_CATCH_RECORD_REFERENCE',
+    message: 'A catch record with this reference already exists.',
+    ...(cause !== undefined ? { cause } : {})
+  })
+}
+
+/**
  * Translates an `insertOne` failure. Distinguishes a duplicate internal ID (`_id`) from a duplicate
  * friendly reference (`catchRecordReference`) using the driver's own `keyPattern`, without exposing any
  * other detail of the raw error.
@@ -39,12 +58,7 @@ export function translateInsertError(error) {
     }
 
     if (Object.hasOwn(keyPattern, 'catchRecordReference')) {
-      return new ApplicationError({
-        category: 'DUPLICATE_RESOURCE',
-        code: 'DUPLICATE_CATCH_RECORD_REFERENCE',
-        message: 'A catch record with this reference already exists.',
-        cause: error
-      })
+      return duplicateCatchRecordReferenceError(error)
     }
   }
 

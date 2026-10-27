@@ -366,6 +366,93 @@ describe('POST /v1/catch-records', () => {
 
     expect(response.statusCode).toBe(403)
   })
+
+  test('creates a DRAFT with a valid client-supplied catchRecordReference', async () => {
+    const { server } = await createTestServer()
+    mockSuccessfulAuthAndVessel()
+    const suppliedReference = 'GBR-CUSTOM01-150126-093045'
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/v1/catch-records',
+      headers: { authorization: 'Bearer token-1' },
+      payload: { vesselId: 'vessel-1', catchRecordReference: suppliedReference }
+    })
+
+    expect(response.statusCode).toBe(201)
+    const body = JSON.parse(response.payload)
+    expect(body.catchRecordReference).toBe(suppliedReference)
+  })
+
+  test('rejects a malformed client-supplied catchRecordReference with a safe 400', async () => {
+    const { server } = await createTestServer()
+    fetchMock.mockResponseOnce(
+      JSON.stringify({ actorId: 'owner-1', permissions: [] })
+    )
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/v1/catch-records',
+      headers: { authorization: 'Bearer token-1' },
+      payload: { vesselId: 'vessel-1', catchRecordReference: 'not-a-reference' }
+    })
+
+    expect(response.statusCode).toBe(400)
+  })
+
+  test('rejects a duplicate client-supplied catchRecordReference with a safe 409', async () => {
+    const { server } = await createTestServer()
+    const suppliedReference = 'GBR-CUSTOM02-150126-093045'
+
+    mockSuccessfulAuthAndVessel()
+    const firstResponse = await server.inject({
+      method: 'POST',
+      url: '/v1/catch-records',
+      headers: { authorization: 'Bearer token-1' },
+      payload: { vesselId: 'vessel-1', catchRecordReference: suppliedReference }
+    })
+    expect(firstResponse.statusCode).toBe(201)
+
+    mockSuccessfulAuthAndVessel()
+    const secondResponse = await server.inject({
+      method: 'POST',
+      url: '/v1/catch-records',
+      headers: { authorization: 'Bearer token-1' },
+      payload: { vesselId: 'vessel-1', catchRecordReference: suppliedReference }
+    })
+
+    expect(secondResponse.statusCode).toBe(409)
+    expect(JSON.parse(secondResponse.payload).code).toBe(
+      'DUPLICATE_CATCH_RECORD_REFERENCE'
+    )
+  })
+
+  test('keeps catchRecordReference immutable after creation', async () => {
+    const { server } = await createTestServer()
+    const suppliedReference = 'GBR-CUSTOM03-150126-093045'
+
+    mockSuccessfulAuthAndVessel()
+    const createResponse = await server.inject({
+      method: 'POST',
+      url: '/v1/catch-records',
+      headers: { authorization: 'Bearer token-1' },
+      payload: { vesselId: 'vessel-1', catchRecordReference: suppliedReference }
+    })
+    const created = JSON.parse(createResponse.payload)
+
+    fetchMock.mockResponseOnce(
+      JSON.stringify({ actorId: 'owner-1', permissions: [] })
+    )
+    const getResponse = await server.inject({
+      method: 'GET',
+      url: `/v1/catch-records/${created.id}`,
+      headers: { authorization: 'Bearer token-1' }
+    })
+
+    expect(JSON.parse(getResponse.payload).catchRecordReference).toBe(
+      suppliedReference
+    )
+  })
 })
 
 function eligibleDraftDocument(overrides = {}) {

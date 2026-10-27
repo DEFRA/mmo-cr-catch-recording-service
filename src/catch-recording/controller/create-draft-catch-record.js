@@ -6,7 +6,10 @@ import {
   NEW_DRAFT_DEFAULTS
 } from '#/catch-recording/domain/canonical-catch-record.js'
 import { PERSISTED_STATUSES } from '#/catch-recording/domain/lifecycle-status.js'
-import { generateCatchRecordReference } from '#/catch-recording/domain/catch-record-reference.js'
+import {
+  generateCatchRecordReference,
+  isValidCatchRecordReferenceFormat
+} from '#/catch-recording/domain/catch-record-reference.js'
 import { resolveVessel } from '#/catch-recording/reference-data/vessel-resolution.js'
 import {
   createCatchRecord,
@@ -14,6 +17,7 @@ import {
   findCatchRecordByReference,
   MIN_EXPECTED_VERSION
 } from '#/catch-recording/persistence/catch-persistence.js'
+import { duplicateCatchRecordReferenceError } from '#/catch-recording/persistence/catch-persistence-errors.js'
 import {
   appendCatchHistoryEvent,
   CATCH_HISTORY_EVENT_TYPES
@@ -34,10 +38,21 @@ import { buildStandardSaveResponse } from './standard-save-response.js'
  * `resolveVessel`), friendly-reference generation (Step 17), canonical initial-draft construction with
  * trusted server-owned metadata, targeted idempotency (Step 12, `DRAFT_CREATION` scope - optional, only
  * applied when the caller supplies an `Idempotency-Key`), persistence (Step 09), and initial history
- * (Step 10). Never trusts a client-supplied owner, audit, status, version, or reference value.
+ * (Step 10). Never trusts a client-supplied owner, audit, status, or version value.
+ *
+ * Step 43 adds one further, narrowly-scoped exception to "never trusts a client-supplied ... reference
+ * value": the caller may optionally supply `catchRecordReference` on this one creation request. When
+ * supplied it is validated against the exact same approved format the generator itself produces
+ * (`CATCH_RECORD_REFERENCE_PATTERN`) and checked for uniqueness before being persisted as-is; when
+ * omitted, behaviour is unchanged - the service generates it (Step 17). Once persisted, the field reverts
+ * to being fully server-owned and immutable (`SERVER_OWNED_FIELDS` already blocks it from every other
+ * endpoint).
  */
 
-const DRAFT_CREATION_ALLOWED_FIELDS = Object.freeze(['vesselId'])
+const DRAFT_CREATION_ALLOWED_FIELDS = Object.freeze([
+  'vesselId',
+  'catchRecordReference'
+])
 const DRAFT_CREATION_ALLOWED_RESULT_FIELDS = Object.freeze([
   'id',
   'catchRecordReference'
@@ -53,6 +68,16 @@ function requireVesselId(vesselId) {
       category: 'INVALID_REQUEST',
       code: 'VESSEL_ID_REQUIRED',
       message: 'A vessel id is required.'
+    })
+  }
+}
+
+function validateSuppliedCatchRecordReferenceFormat(catchRecordReference) {
+  if (!isValidCatchRecordReferenceFormat(catchRecordReference)) {
+    throw new ApplicationError({
+      category: 'INVALID_REQUEST',
+      code: 'CATCH_RECORD_REFERENCE_INVALID_FORMAT',
+      message: 'The supplied catch record reference is not in a valid format.'
     })
   }
 }
@@ -115,13 +140,17 @@ async function startIdempotencyClaim({
   db,
   ownerUserId,
   idempotencyKey,
-  vesselId
+  vesselId,
+  catchRecordReference
 }) {
   const fingerprint = computeRequestFingerprint({
     operationScope: IDEMPOTENCY_OPERATION_SCOPES.DRAFT_CREATION,
     idempotencyKey,
     allowedFields: DRAFT_CREATION_ALLOWED_FIELDS,
-    semanticInput: { vesselId }
+    semanticInput: {
+      vesselId,
+      ...(catchRecordReference ? { catchRecordReference } : {})
+    }
   })
 
   const claim = await claimIdempotency(db, {
@@ -142,12 +171,53 @@ async function startIdempotencyClaim({
   return { fingerprint, claim }
 }
 
+async function referenceAlreadyExists(db, candidate) {
+  return Boolean(
+    await findCatchRecordByReference(db, { catchRecordReference: candidate })
+  )
+}
+
+/**
+ * Resolves the friendly reference for a new draft: reuses a valid, unique client-supplied value
+ * (Step 43) as-is, or falls back to the Step 17 generator when none is supplied.
+ *
+ * @param {Object} input
+ * @param {import('mongodb').Db} input.db
+ * @param {string|undefined} input.catchRecordReference client-supplied reference, already
+ *   format-validated by `validateSuppliedCatchRecordReferenceFormat`
+ * @param {object} input.vessel the resolved, authorised vessel
+ * @param {string} input.businessTimezone approved business timezone
+ * @returns {Promise<string>}
+ */
+async function resolveCatchRecordReference({
+  db,
+  catchRecordReference,
+  vessel,
+  businessTimezone
+}) {
+  if (catchRecordReference) {
+    if (await referenceAlreadyExists(db, catchRecordReference)) {
+      throw duplicateCatchRecordReferenceError()
+    }
+
+    return catchRecordReference
+  }
+
+  return generateCatchRecordReference({
+    rss: vessel.rssSnapshot,
+    timezone: businessTimezone,
+    referenceExists: (candidate) => referenceAlreadyExists(db, candidate)
+  })
+}
+
 /**
  * @param {Object} input
  * @param {import('mongodb').Db} input.db
  * @param {object} input.referenceDataClient Step 15 Reference Data Service client
  * @param {{ userId: string, scopes: ReadonlyArray<string> }} input.authenticationContext
  * @param {unknown} input.vesselId client-supplied vessel selection
+ * @param {string|undefined} [input.catchRecordReference] optional client-supplied friendly reference
+ *   (Step 43). When omitted, the service generates one as before.
  * @param {string|undefined} input.idempotencyKey optional `Idempotency-Key` header value
  * @param {string} input.businessTimezone approved business timezone (`config.get('businessTimezone')`)
  * @param {string} [input.correlationId]
@@ -158,11 +228,17 @@ export async function createDraftCatchRecord({
   referenceDataClient,
   authenticationContext,
   vesselId,
+  catchRecordReference: suppliedCatchRecordReference,
   idempotencyKey,
   businessTimezone,
   correlationId
 }) {
   requireVesselId(vesselId)
+
+  if (suppliedCatchRecordReference) {
+    validateSuppliedCatchRecordReferenceFormat(suppliedCatchRecordReference)
+  }
+
   const ownerUserId = authenticationContext?.userId
 
   let idempotency
@@ -171,7 +247,8 @@ export async function createDraftCatchRecord({
       db,
       ownerUserId,
       idempotencyKey,
-      vesselId
+      vesselId,
+      catchRecordReference: suppliedCatchRecordReference
     })
 
     if (idempotency.claim.outcome === IDEMPOTENCY_CLAIM_OUTCOMES.REPLAY) {
@@ -193,15 +270,11 @@ export async function createDraftCatchRecord({
     correlationId
   })
 
-  const catchRecordReference = await generateCatchRecordReference({
-    rss: vessel.rssSnapshot,
-    timezone: businessTimezone,
-    referenceExists: async (candidate) =>
-      Boolean(
-        await findCatchRecordByReference(db, {
-          catchRecordReference: candidate
-        })
-      )
+  const catchRecordReference = await resolveCatchRecordReference({
+    db,
+    catchRecordReference: suppliedCatchRecordReference,
+    vessel,
+    businessTimezone
   })
 
   const id = randomUUID()

@@ -1,5 +1,6 @@
 import { ApplicationError } from '#/common/helpers/errors/application-error.js'
 import {
+  duplicateCatchRecordReferenceError,
   malformedDocumentError,
   translateInsertError,
   unexpectedPersistenceError,
@@ -34,6 +35,17 @@ describe('#catch-persistence-errors', () => {
       expect(error.code).toBe('DUPLICATE_CATCH_RECORD_REFERENCE')
     })
 
+    test('Should share the exact error built by duplicateCatchRecordReferenceError', () => {
+      const translated = translateInsertError(
+        duplicateKeyError({ catchRecordReference: 1 })
+      )
+      const direct = duplicateCatchRecordReferenceError()
+
+      expect(translated.category).toBe(direct.category)
+      expect(translated.code).toBe(direct.code)
+      expect(translated.message).toBe(direct.message)
+    })
+
     test('Should translate any other failure as an unexpected persistence error', () => {
       const error = translateInsertError(new Error('connection reset'))
 
@@ -60,6 +72,17 @@ describe('#catch-persistence-errors', () => {
       const error = translateInsertError(duplicateKeyError({ _id: 1 }))
 
       expect(JSON.stringify(error)).not.toMatch(/E11000/)
+      expect(Object.keys(error.toJSON())).not.toContain('cause')
+    })
+  })
+
+  describe('duplicateCatchRecordReferenceError', () => {
+    test('Should build a DUPLICATE_RESOURCE/DUPLICATE_CATCH_RECORD_REFERENCE error with no cause', () => {
+      const error = duplicateCatchRecordReferenceError()
+
+      expect(error).toBeInstanceOf(ApplicationError)
+      expect(error.category).toBe('DUPLICATE_RESOURCE')
+      expect(error.code).toBe('DUPLICATE_CATCH_RECORD_REFERENCE')
       expect(Object.keys(error.toJSON())).not.toContain('cause')
     })
   })
