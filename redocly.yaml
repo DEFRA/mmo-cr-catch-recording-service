@@ -1,0 +1,6 @@
+apis:
+  catch-recording-service@v1:
+    root: src/openapi/openapi.yaml
+
+extends:
+  - recommended

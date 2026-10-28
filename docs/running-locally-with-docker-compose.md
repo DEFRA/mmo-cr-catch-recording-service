@@ -61,7 +61,7 @@ export CR_URL=http://localhost:3001
 
 ## Testing unauthenticated endpoints (works immediately)
 
-These two endpoints require no configuration beyond `docker compose up`:
+These endpoints require no configuration beyond `docker compose up`:
 
 ```bash
 # Health probe
@@ -70,6 +70,10 @@ curl -i "$CR_URL/health"
 # Generic example endpoints (skeleton template, not Catch Recording domain)
 curl -i "$CR_URL/example"
 curl -i "$CR_URL/example/some-id"
+
+# The OpenAPI 3.1 contract for every endpoint in this guide, served live from the running service
+curl -i "$CR_URL/openapi.json"
+curl -i "$CR_URL/openapi.yaml"
 ```
 
 Expected: `curl -i "$CR_URL/health"` returns `200` with `{"message":"success"}`.

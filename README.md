@@ -131,6 +131,30 @@ this service exposes (Catch Records, vessel favourites and skippers, platform he
 | `GET: /health`       | Health                         |
 | `GET: /example    `  | Example API (remove as needed) |
 | `GET: /example/<id>` | Example API (remove as needed) |
+| `GET: /openapi.json` | The OpenAPI contract as JSON   |
+| `GET: /openapi.yaml` | The OpenAPI contract as YAML   |
+
+### OpenAPI contract
+
+[`src/openapi/openapi.yaml`](./src/openapi/openapi.yaml) is the version-controlled OpenAPI 3.1 contract
+describing every endpoint above exactly as implemented. It is maintained **manually** alongside route
+changes — there is no generator — and is kept honest by `src/openapi/openapi-contract.test.js`, which
+fails the build if a route is added, removed, or changed without the contract being updated to match.
+
+The same committed file is also served at runtime, unauthenticated, at `GET /openapi.json` (parsed to
+JSON) and `GET /openapi.yaml` (the raw YAML), so a consumer can fetch the current contract directly
+from a running instance of the service instead of needing repository access.
+
+Validate or lint it locally with:
+
+```bash
+npm run openapi:lint
+```
+
+This runs [Redocly CLI](https://redocly.com/docs/cli/)'s `recommended` ruleset (config:
+[`redocly.yaml`](./redocly.yaml)) and is also run in CI and in `npm run git:pre-commit-hook`. When you
+add, remove, or change a route, Joi schema, status code, or error response, update
+`src/openapi/openapi.yaml` in the same change — `npm test` will fail otherwise.
 
 ## Development helpers
 
