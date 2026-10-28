@@ -813,6 +813,8 @@ No text, wildcard, partial, sparse, or TTL index exists anywhere in the service.
 erDiagram
     CATCH_RECORDS ||--o{ CATCH_RECORD_HISTORY : "catchRecordId"
     CATCH_RECORDS ||--o{ SUBMISSION_ARTIFACT_OBJECTS : "catchRecordId + submissionNumber (metadata only in artifacts[])"
+    CATCH_RECORDS |o--o{ CATCH_IDEMPOTENCY_CLAIMS : "resourceId, when scoped to a catch record (SUBMISSION / RESUBMISSION / EDIT_START / COMPLETION)"
+    VESSEL_PROFILES |o--o{ CATCH_IDEMPOTENCY_CLAIMS : "resourceId = vesselId, optionally :type-suffixed, when scoped to a vessel (ADD_FAVOURITE / ADD_SKIPPER)"
     VESSEL_PROFILES }o--|| REFERENCE_DATA_SERVICE : "favouriteGearIds / favouriteSpeciesIds / favouritePortIds reference by ID"
     CATCH_RECORDS }o--|| REFERENCE_DATA_SERVICE : "vessel / gears / species / ports / statisticalArea snapshots"
     CATCH_RECORDS }o--|| AUTHENTICATION_SERVICE : "ownerUserId / createdBy / updatedBy reference identity"
@@ -847,7 +849,7 @@ erDiagram
         string ownerUserId
         string operationScope
         string idempotencyKey
-        string resourceId
+        string resourceId "polymorphic FK, see note below"
         string fingerprint
         string state
     }
@@ -870,6 +872,30 @@ erDiagram
         string externalIdentity "userId, scopes — owned elsewhere, never persisted locally"
     }
 ```
+
+### `CATCH_IDEMPOTENCY_CLAIMS` in the diagram
+
+`CATCH_IDEMPOTENCY_CLAIMS` is not a child of any one collection — it is a cross-cutting guard that claims
+exactly one duplicate-consequence operation, scoped by `ownerUserId` + `operationScope` +
+`idempotencyKey` (see [`catch-idempotency-claims`](#catch-idempotency-claims) for the full field
+dictionary). Its `resourceId` field is **polymorphic**, not a single fixed foreign key, which is why the
+diagram shows it as two separate, optional (`|o--o{`) relationships rather than one fixed one:
+
+| `operationScope`                                         | What `resourceId` actually holds                                                                                                                                            | Relationship shown     |
+| -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
+| `SUBMISSION`, `RESUBMISSION`, `EDIT_START`, `COMPLETION` | The target `catch-records._id` (`catchRecordId`)                                                                                                                            | `CATCH_RECORDS` edge   |
+| `ADD_FAVOURITE`                                          | The target vessel's `vessel-profiles._id` (`vesselId`), suffixed per favourite type (e.g. `{vesselId}:gear`) so the three favourite endpoints never collide on the same key | `VESSEL_PROFILES` edge |
+| `ADD_SKIPPER`                                            | The target vessel's `vessel-profiles._id` (`vesselId`), unsuffixed                                                                                                          | `VESSEL_PROFILES` edge |
+| `DRAFT_CREATION`                                         | No real resource exists yet — persistence substitutes an internal sentinel value (`'\u0000NO_RESOURCE\u0000'`), never exposed to callers                                    | Neither edge applies   |
+
+Both edges are drawn **zero-or-one** on the collection side (`|o`) because a `DRAFT_CREATION` claim
+references neither collection, and **zero-or-more** on the claims side (`o{`) because one Catch Record or
+vessel profile can be the target of several claims over time (e.g. a `SUBMISSION` claim and a later
+`EDIT_START` claim against the same `catchRecordId`). There is no MongoDB-enforced foreign key for either
+edge — `resourceId` is a plain string column; the relationship is maintained entirely by the calling
+business operation (`submit-catch-record.js`, `start-catch-record-edit.js`, `complete-catch-record.js`,
+`vessel-favourites.js`, `vessel-skippers.js`), each of which supplies its own `resourceId` at the call
+site.
 
 ---
 
