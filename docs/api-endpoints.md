@@ -2,7 +2,10 @@
 
 > A complete, single-page inventory of every HTTP endpoint currently exposed by this service. For full
 > request/response contracts and business rules see the linked per-capability documentation; this
-> document is the quick-reference index, not a duplicate of those contracts.
+> document is the quick-reference index, not a duplicate of those contracts. A machine-readable
+> OpenAPI 3.1 contract for every endpoint below also exists at
+> [`src/openapi/openapi.yaml`](../src/openapi/openapi.yaml), and is served live, unauthenticated, at
+> `GET /openapi.json` and `GET /openapi.yaml`.
 
 ## Conventions used below
 
@@ -29,6 +32,13 @@
 | :----- | :--------------------- | :--- | :----------------------------------------------------- |
 | GET    | `/example`             | none | Lists example data from the generic skeleton template. |
 | GET    | `/example/{exampleId}` | none | Retrieves one example record by id, or `404`.          |
+
+## OpenAPI contract (documentation-delivery only — not a Catch Recording business endpoint)
+
+| Method | Path            | Auth | Description                                                        |
+| :----- | :-------------- | :--- | :----------------------------------------------------------------- |
+| GET    | `/openapi.json` | none | The committed `src/openapi/openapi.yaml` contract, served as JSON. |
+| GET    | `/openapi.yaml` | none | The committed `src/openapi/openapi.yaml` contract, served as-is.   |
 
 ---
 
@@ -113,4 +123,6 @@ Vessel favourites:            9  (3 resource types x list/add/remove)
 Vessel skippers:              3
 -----------------------------------
 Total:                        27
+
+OpenAPI contract delivery (not counted above): 2  (GET /openapi.json, GET /openapi.yaml)
 ```

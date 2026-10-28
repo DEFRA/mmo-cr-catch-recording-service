@@ -13,9 +13,10 @@
     "docker:dev": "npm run dev",
     "format": "prettier --write \"**/*.{cjs,js,json,md}\"",
     "format:check": "prettier --check \"**/*.{cjs,js,json,md}\"",
-    "git:pre-commit-hook": "npm run security-audit && npm run format:check && npm run lint && npm test",
+    "git:pre-commit-hook": "npm run security-audit && npm run format:check && npm run lint && npm run openapi:lint && npm test",
     "lint": "eslint --cache --cache-strategy content \"**/*.{cjs,js}\"",
     "lint:fix": "npm run lint -- --fix",
+    "openapi:lint": "redocly lint",
     "security-audit": "npm audit --audit-level=critical",
     "server:debug": "node --watch --inspect-brk=0.0.0.0 --env-file-if-exists=.env ./src",
     "server:watch": "node --watch --inspect=0.0.0.0 --env-file-if-exists=.env ./src",
@@ -49,9 +50,11 @@
     "mongodb": "7.6.0",
     "pdfkit": "0.20.2",
     "pino": "10.3.1",
-    "pino-pretty": "13.1.3"
+    "pino-pretty": "13.1.3",
+    "yaml": "2.9.1"
   },
   "devDependencies": {
+    "@redocly/cli": "2.66.0",
     "@vitest/coverage-v8": "4.1.11",
     "eslint": "9.39.5",
     "husky": "9.1.7",

@@ -1,0 +1,1345 @@
+openapi: 3.1.0
+
+info:
+  title: MMO Catch Recording — Catch Recording Service API
+  version: "1.0.0"
+  description: >-
+    The JSON API exposed by the MMO Catch Recording Catch Recording Service to other Catch Recording
+    client services. Describes the Catch Record lifecycle (draft creation, section saves, complete
+    replacement, submission, completion, edit-start, abandonment), queries (listing, retrieval,
+    history, submission artifacts), vessel favourites and vessel-owned skippers, and the platform
+    health check.
+
+    This contract documents the service exactly as implemented. It is maintained manually alongside
+    route changes — see `src/openapi/README.md` for how to validate and update it. The companion
+    narrative reference is `docs/api-endpoints.md`.
+  license:
+    name: Open Government Licence v3.0
+    url: http://www.nationalarchives.gov.uk/doc/open-government-licence/version/3
+
+servers:
+  - url: /
+    description: Relative to wherever this service is deployed behind the platform gateway.
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Platform
+    description: Service-level operational endpoints.
+  - name: Example
+    description: Generic service-skeleton template endpoints, not part of the Catch Recording domain.
+  - name: Catch Records
+    description: Catch Record lifecycle commands and queries.
+  - name: Vessel Favourites
+    description: Vessel-scoped favourite gears, species, and ports.
+  - name: Vessel Skippers
+    description: Vessel-owned skipper records.
+
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      tags: [Platform]
+      summary: Health probe
+      description: >-
+        Fast, dependency-free liveness/readiness probe used by the platform. Always unauthenticated.
+      security: []
+      responses:
+        "200":
+          description: The service is up.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [message]
+                properties:
+                  message:
+                    type: string
+                    const: success
+              examples:
+                default:
+                  value: { message: success }
+
+  /example:
+    get:
+      operationId: listExampleData
+      tags: [Example]
+      summary: List example data (template skeleton, not Catch Recording domain)
+      description: >-
+        Generic service-skeleton example endpoint, still registered. No request validation is applied
+        and no documented error response is reachable.
+      security: []
+      responses:
+        "200":
+          description: An array of example documents.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ExampleEntity" }
+
+  /example/{exampleId}:
+    get:
+      operationId: getExampleDataById
+      tags: [Example]
+      summary: Retrieve one example document by id (template skeleton)
+      security: []
+      parameters:
+        - name: exampleId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: The example document.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExampleEntity" }
+        "404":
+          description: No example document exists for the supplied id.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /v1/catch-records:
+    get:
+      operationId: listCatchRecords
+      tags: [Catch Records]
+      summary: List the caller's own Catch Records
+      description: Owner-scoped, bounded listing, newest first.
+      parameters:
+        - $ref: "#/components/parameters/ListLimit"
+        - name: status
+          in: query
+          required: false
+          description: Optional persisted-status filter.
+          schema: { $ref: "#/components/schemas/PersistedStatus" }
+      responses:
+        "200":
+          description: The owner's bounded Catch Record listing.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CatchRecordListResponse" }
+        "400": { $ref: "#/components/responses/BadRequestError" }
+        "401": { $ref: "#/components/responses/UnauthorizedError" }
+    post:
+      operationId: createDraftCatchRecord
+      tags: [Catch Records]
+      summary: Create the first persistent DRAFT Catch Record for a vessel
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateDraftCatchRecordPayload" }
+      responses:
+        "201":
+          description: The newly created DRAFT Catch Record's standard save response.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StandardSaveResponse" }
+        "400": { $ref: "#/components/responses/BadRequestError" }
+        "401": { $ref: "#/components/responses/UnauthorizedError" }
+        "409":
+          description: >-
+            A client-supplied `catchRecordReference` already exists (`DUPLICATE_RESOURCE`), or the
+            same `Idempotency-Key` was already used with a different request (`IDEMPOTENCY_CONFLICT`).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "422": { $ref: "#/components/responses/UnprocessableEntityError" }
+        "502": { $ref: "#/components/responses/BadGatewayError" }
+        "503": { $ref: "#/components/responses/ServiceUnavailableError" }
+        "504": { $ref: "#/components/responses/GatewayTimeoutError" }
+
+  /v1/catch-records/{catchRecordId}:
+    parameters:
+      - $ref: "#/components/parameters/CatchRecordIdPath"
+    get:
+      operationId: retrieveCatchRecord
+      tags: [Catch Records]
+      summary: Retrieve one complete Catch Record
+      description: >-
+        Complete retrieval with derived display status, section completion, domain-progress facts,
+        and preliminary submission eligibility.
+      responses:
+        "200":
+          description: The complete Catch Record.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RetrieveCatchRecordResponse" }
+        "400": { $ref: "#/components/responses/BadRequestError" }
+        "401": { $ref: "#/components/responses/UnauthorizedError" }
+        "404": { $ref: "#/components/responses/NotFoundError" }
+    put:
+      operationId: replaceCatchRecord
+      tags: [Catch Records]
+      summary: Complete mobile replacement of client-owned content
+      description: >-
+        Replaces every client-owned section in one request. Requires `If-Match` with the record's
+        current `version`. Maximum payload size 1 MiB.
+      parameters:
+        - $ref: "#/components/parameters/IfMatchHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CompleteReplacementPayload" }
+      responses:
+        "200":
+          description: The standard save response reflecting the committed replacement.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StandardSaveResponse" }
+        "400": { $ref: "#/components/responses/BadRequestError" }
+        "401": { $ref: "#/components/responses/UnauthorizedError" }
+        "404": { $ref: "#/components/responses/NotFoundError" }
+        "409":
+          description: The supplied `If-Match` no longer matches the record's current `version`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "413":
+          description: The request payload exceeded the 1 MiB limit.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "422": { $ref: "#/components/responses/UnprocessableEntityError" }
+        "502": { $ref: "#/components/responses/BadGatewayError" }
+        "503": { $ref: "#/components/responses/ServiceUnavailableError" }
+        "504": { $ref: "#/components/responses/GatewayTimeoutError" }
+    patch:
+      operationId: saveCatchRecordSection
+      tags: [Catch Records]
+      summary: Save one section of a Catch Record
+      description: >-
+        Generic section save: one of `trip`, `pairFishing`, `gears`, `speciesNotLanded`. Requires
+        `If-Match` with the record's current `version`.
+      parameters:
+        - $ref: "#/components/parameters/IfMatchHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SectionPatchPayload" }
+      responses:
+        "200":
+          description: The standard save response reflecting the committed section.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StandardSaveResponse" }
+        "400": { $ref: "#/components/responses/BadRequestError" }
+        "401": { $ref: "#/components/responses/UnauthorizedError" }
+        "404": { $ref: "#/components/responses/NotFoundError" }
+        "409":
+          description: The supplied `If-Match` no longer matches the record's current `version`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "422": { $ref: "#/components/responses/UnprocessableEntityError" }
+        "502": { $ref: "#/components/responses/BadGatewayError" }
+        "503": { $ref: "#/components/responses/ServiceUnavailableError" }
+        "504": { $ref: "#/components/responses/GatewayTimeoutError" }
+    delete:
+      operationId: abandonDraftCatchRecord
+      tags: [Catch Records]
+      summary: Abandon an eligible, never-submitted DRAFT
+      description: Requires `If-Match`. Idempotent — repeating the same call after success returns `204`.
+      parameters:
+        - $ref: "#/components/parameters/IfMatchHeader"
+      responses:
+        "204":
+          description: The DRAFT was abandoned (or had already been abandoned).
+        "400": { $ref: "#/components/responses/BadRequestError" }
+        "401": { $ref: "#/components/responses/UnauthorizedError" }
+        "404": { $ref: "#/components/responses/NotFoundError" }
+        "409":
+          description: >-
+            The supplied `If-Match` no longer matches the record's current `version`, or the record
+            is not an eligible, never-submitted `DRAFT`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /v1/catch-records/{catchRecordId}/history:
+    get:
+      operationId: getCatchRecordHistory
+      tags: [Catch Records]
+      summary: Combined lifecycle and audit history
+      parameters:
+        - $ref: "#/components/parameters/CatchRecordIdPath"
+        - $ref: "#/components/parameters/ListLimit"
+      responses:
+        "200":
+          description: The bounded, deterministically ordered combined history.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CatchRecordHistoryResponse" }
+        "400": { $ref: "#/components/responses/BadRequestError" }
+        "401": { $ref: "#/components/responses/UnauthorizedError" }
+        "404": { $ref: "#/components/responses/NotFoundError" }
+
+  /v1/catch-records/{catchRecordId}/submission:
+    post:
+      operationId: submitCatchRecord
+      tags: [Catch Records]
+      summary: Submit the Catch Record
+      description: >-
+        Generates the immutable JSON snapshot and PDF receipt for this submission. Requires
+        `If-Match`. Safe to replay with the same `Idempotency-Key`.
+      parameters:
+        - $ref: "#/components/parameters/CatchRecordIdPath"
+        - $ref: "#/components/parameters/IfMatchHeader"
+        - $ref: "#/components/parameters/IdempotencyKeyHeader"
+      responses:
+        "200":
+          description: The submission response.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SubmissionResponse" }
+        "400": { $ref: "#/components/responses/BadRequestError" }
+        "401": { $ref: "#/components/responses/UnauthorizedError" }
+        "404": { $ref: "#/components/responses/NotFoundError" }
+        "409":
+          description: >-
+            The supplied `If-Match` no longer matches the record's current `version`, the record is
+            not in a submittable lifecycle state, or the same `Idempotency-Key` was already used with
+            a different request.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "422": { $ref: "#/components/responses/UnprocessableEntityError" }
+        "502": { $ref: "#/components/responses/BadGatewayError" }
+        "503": { $ref: "#/components/responses/ServiceUnavailableError" }
+        "504": { $ref: "#/components/responses/GatewayTimeoutError" }
+
+  /v1/catch-records/{catchRecordId}/submissions:
+    get:
+      operationId: listSubmissionArtifacts
+      tags: [Catch Records]
+      summary: List every committed submission version's artifact metadata
+      description: Metadata only — no artifact body is returned by this operation.
+      parameters:
+        - $ref: "#/components/parameters/CatchRecordIdPath"
+      responses:
+        "200":
+          description: The committed submissions, ordered ascending by submission number.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SubmissionsListResponse" }
+        "400": { $ref: "#/components/responses/BadRequestError" }
+        "401": { $ref: "#/components/responses/UnauthorizedError" }
+        "404": { $ref: "#/components/responses/NotFoundError" }
+
+  /v1/catch-records/{catchRecordId}/submissions/{submissionNumber}/{artifactType}:
+    get:
+      operationId: retrieveSubmissionArtifact
+      tags: [Catch Records]
+      summary: Retrieve one immutable submission artifact body
+      description: Returns the artifact file as an attachment download.
+      parameters:
+        - $ref: "#/components/parameters/CatchRecordIdPath"
+        - name: submissionNumber
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1, maximum: 1000 }
+        - name: artifactType
+          in: path
+          required: true
+          schema: { $ref: "#/components/schemas/PublicArtifactType" }
+      responses:
+        "200":
+          description: The artifact body.
+          headers:
+            Content-Disposition:
+              description: >-
+                `attachment; filename="<catchRecordReference>-<submissionNumber>.<json|pdf>"`
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                type: object
+                description: The committed immutable JSON snapshot (returned when `artifactType` is `json`).
+                additionalProperties: true
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+                description: The committed PDF receipt (returned when `artifactType` is `pdf`).
+        "400": { $ref: "#/components/responses/BadRequestError" }
+        "401": { $ref: "#/components/responses/UnauthorizedError" }
+        "404":
+          description: >-
+            The Catch Record does not exist for this owner, or no committed artifact exists for the
+            requested submission number and type.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /v1/catch-records/{catchRecordId}/completion:
+    post:
+      operationId: completeCatchRecord
+      tags: [Catch Records]
+      summary: Restricted-permission transition SUBMITTED → COMPLETE
+      description: >-
+        Requires an authenticated caller whose trusted scopes include `catch-recording.complete`.
+        Requires `If-Match`. Safe to replay with the same `Idempotency-Key`.
+      parameters:
+        - $ref: "#/components/parameters/CatchRecordIdPath"
+        - $ref: "#/components/parameters/IfMatchHeader"
+        - $ref: "#/components/parameters/IdempotencyKeyHeader"
+      responses:
+        "200":
+          description: The completion response.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CompletionResponse" }
+        "400": { $ref: "#/components/responses/BadRequestError" }
+        "401": { $ref: "#/components/responses/UnauthorizedError" }
+        "403": { $ref: "#/components/responses/ForbiddenError" }
+        "404": { $ref: "#/components/responses/NotFoundError" }
+        "409":
+          description: >-
+            The supplied `If-Match` no longer matches the record's current `version`, the record is
+            not `SUBMITTED`, or the same `Idempotency-Key` was already used with a different request.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /v1/catch-records/{catchRecordId}/edit-start:
+    post:
+      operationId: startCatchRecordEdit
+      tags: [Catch Records]
+      summary: Start an in-place amendment
+      description: >-
+        Transitions `SUBMITTED`/`COMPLETE` back to `DRAFT` for in-place amendment. Requires
+        `If-Match`. Safe to replay with the same `Idempotency-Key`. Amendment saves reuse the
+        `PATCH` section-save operation; resubmission reuses the submission operation.
+      parameters:
+        - $ref: "#/components/parameters/CatchRecordIdPath"
+        - $ref: "#/components/parameters/IfMatchHeader"
+        - $ref: "#/components/parameters/IdempotencyKeyHeader"
+      responses:
+        "200":
+          description: The standard save response reflecting the record's return to `DRAFT`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StandardSaveResponse" }
+        "400": { $ref: "#/components/responses/BadRequestError" }
+        "401": { $ref: "#/components/responses/UnauthorizedError" }
+        "404": { $ref: "#/components/responses/NotFoundError" }
+        "409":
+          description: >-
+            The supplied `If-Match` no longer matches the record's current `version`, the record is
+            not `SUBMITTED`/`COMPLETE`, or the same `Idempotency-Key` was already used with a
+            different request.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /v1/vessels/{vesselId}/favourite-gears:
+    parameters:
+      - $ref: "#/components/parameters/VesselIdPath"
+    get:
+      operationId: listFavouriteGears
+      tags: [Vessel Favourites]
+      summary: List a vessel's favourite gears
+      responses:
+        "200":
+          description: The vessel's favourite gear ids.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FavouriteGearsResponse" }
+        "400": { $ref: "#/components/responses/BadRequestError" }
+        "401": { $ref: "#/components/responses/UnauthorizedError" }
+        "403": { $ref: "#/components/responses/ForbiddenError" }
+    post:
+      operationId: addFavouriteGear
+      tags: [Vessel Favourites]
+      summary: Add a favourite gear
+      description: >-
+        Validates `gearId` against the Reference Data Service. Idempotent — adding an
+        already-favourited gear is a no-op.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FavouriteGearPayload" }
+      responses:
+        "200":
+          description: The updated favourite gear ids.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FavouriteGearsResponse" }
+        "400": { $ref: "#/components/responses/BadRequestError" }
+        "401": { $ref: "#/components/responses/UnauthorizedError" }
+        "403": { $ref: "#/components/responses/ForbiddenError" }
+        "409":
+          description: The same `Idempotency-Key` was already used with a different request.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "422": { $ref: "#/components/responses/UnprocessableEntityError" }
+        "502": { $ref: "#/components/responses/BadGatewayError" }
+        "503": { $ref: "#/components/responses/ServiceUnavailableError" }
+        "504": { $ref: "#/components/responses/GatewayTimeoutError" }
+
+  /v1/vessels/{vesselId}/favourite-gears/{gearId}:
+    delete:
+      operationId: removeFavouriteGear
+      tags: [Vessel Favourites]
+      summary: Remove a favourite gear
+      description: Safe to repeat.
+      parameters:
+        - $ref: "#/components/parameters/VesselIdPath"
+        - name: gearId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "204":
+          description: The favourite gear was removed (or was already absent).
+        "400": { $ref: "#/components/responses/BadRequestError" }
+        "401": { $ref: "#/components/responses/UnauthorizedError" }
+        "403": { $ref: "#/components/responses/ForbiddenError" }
+
+  /v1/vessels/{vesselId}/favourite-species:
+    parameters:
+      - $ref: "#/components/parameters/VesselIdPath"
+    get:
+      operationId: listFavouriteSpecies
+      tags: [Vessel Favourites]
+      summary: List a vessel's favourite species
+      responses:
+        "200":
+          description: The vessel's favourite species ids.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FavouriteSpeciesResponse" }
+        "400": { $ref: "#/components/responses/BadRequestError" }
+        "401": { $ref: "#/components/responses/UnauthorizedError" }
+        "403": { $ref: "#/components/responses/ForbiddenError" }
+    post:
+      operationId: addFavouriteSpecies
+      tags: [Vessel Favourites]
+      summary: Add a favourite species
+      description: Same validation/idempotency behaviour as favourite gears.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FavouriteSpeciesPayload" }
+      responses:
+        "200":
+          description: The updated favourite species ids.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FavouriteSpeciesResponse" }
+        "400": { $ref: "#/components/responses/BadRequestError" }
+        "401": { $ref: "#/components/responses/UnauthorizedError" }
+        "403": { $ref: "#/components/responses/ForbiddenError" }
+        "409":
+          description: The same `Idempotency-Key` was already used with a different request.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "422": { $ref: "#/components/responses/UnprocessableEntityError" }
+        "502": { $ref: "#/components/responses/BadGatewayError" }
+        "503": { $ref: "#/components/responses/ServiceUnavailableError" }
+        "504": { $ref: "#/components/responses/GatewayTimeoutError" }
+
+  /v1/vessels/{vesselId}/favourite-species/{speciesId}:
+    delete:
+      operationId: removeFavouriteSpecies
+      tags: [Vessel Favourites]
+      summary: Remove a favourite species
+      description: Safe to repeat.
+      parameters:
+        - $ref: "#/components/parameters/VesselIdPath"
+        - name: speciesId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "204":
+          description: The favourite species was removed (or was already absent).
+        "400": { $ref: "#/components/responses/BadRequestError" }
+        "401": { $ref: "#/components/responses/UnauthorizedError" }
+        "403": { $ref: "#/components/responses/ForbiddenError" }
+
+  /v1/vessels/{vesselId}/favourite-ports:
+    parameters:
+      - $ref: "#/components/parameters/VesselIdPath"
+    get:
+      operationId: listFavouritePorts
+      tags: [Vessel Favourites]
+      summary: List a vessel's favourite ports
+      responses:
+        "200":
+          description: The vessel's favourite port ids.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FavouritePortsResponse" }
+        "400": { $ref: "#/components/responses/BadRequestError" }
+        "401": { $ref: "#/components/responses/UnauthorizedError" }
+        "403": { $ref: "#/components/responses/ForbiddenError" }
+    post:
+      operationId: addFavouritePort
+      tags: [Vessel Favourites]
+      summary: Add a favourite port
+      description: Same validation/idempotency behaviour as favourite gears.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FavouritePortPayload" }
+      responses:
+        "200":
+          description: The updated favourite port ids.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FavouritePortsResponse" }
+        "400": { $ref: "#/components/responses/BadRequestError" }
+        "401": { $ref: "#/components/responses/UnauthorizedError" }
+        "403": { $ref: "#/components/responses/ForbiddenError" }
+        "409":
+          description: The same `Idempotency-Key` was already used with a different request.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "422": { $ref: "#/components/responses/UnprocessableEntityError" }
+        "502": { $ref: "#/components/responses/BadGatewayError" }
+        "503": { $ref: "#/components/responses/ServiceUnavailableError" }
+        "504": { $ref: "#/components/responses/GatewayTimeoutError" }
+
+  /v1/vessels/{vesselId}/favourite-ports/{portId}:
+    delete:
+      operationId: removeFavouritePort
+      tags: [Vessel Favourites]
+      summary: Remove a favourite port
+      description: Safe to repeat.
+      parameters:
+        - $ref: "#/components/parameters/VesselIdPath"
+        - name: portId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "204":
+          description: The favourite port was removed (or was already absent).
+        "400": { $ref: "#/components/responses/BadRequestError" }
+        "401": { $ref: "#/components/responses/UnauthorizedError" }
+        "403": { $ref: "#/components/responses/ForbiddenError" }
+
+  /v1/vessels/{vesselId}/skippers:
+    parameters:
+      - $ref: "#/components/parameters/VesselIdPath"
+    get:
+      operationId: listSkippers
+      tags: [Vessel Skippers]
+      summary: List a vessel's skippers
+      responses:
+        "200":
+          description: The vessel's skippers.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SkippersResponse" }
+        "400": { $ref: "#/components/responses/BadRequestError" }
+        "401": { $ref: "#/components/responses/UnauthorizedError" }
+        "403": { $ref: "#/components/responses/ForbiddenError" }
+    post:
+      operationId: addSkipper
+      tags: [Vessel Skippers]
+      summary: Add a vessel-owned skipper
+      description: >-
+        Server-generates `id`. Idempotent for a case-insensitive, trimmed duplicate name. No update
+        endpoint exists for a skipper.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SkipperPayload" }
+      responses:
+        "200":
+          description: The updated skippers list.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SkippersResponse" }
+        "400": { $ref: "#/components/responses/BadRequestError" }
+        "401": { $ref: "#/components/responses/UnauthorizedError" }
+        "403": { $ref: "#/components/responses/ForbiddenError" }
+        "409":
+          description: The same `Idempotency-Key` was already used with a different request.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /v1/vessels/{vesselId}/skippers/{skipperId}:
+    delete:
+      operationId: removeSkipper
+      tags: [Vessel Skippers]
+      summary: Remove a vessel-owned skipper
+      description: Safe to repeat.
+      parameters:
+        - $ref: "#/components/parameters/VesselIdPath"
+        - name: skipperId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "204":
+          description: The skipper was removed (or was already absent).
+        "400": { $ref: "#/components/responses/BadRequestError" }
+        "401": { $ref: "#/components/responses/UnauthorizedError" }
+        "403": { $ref: "#/components/responses/ForbiddenError" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: >-
+        A trusted bearer token validated against the Authentication Service. The caller's identity is
+        established only from an `Authorization: Bearer <token>` header.
+
+  parameters:
+    CatchRecordIdPath:
+      name: catchRecordId
+      in: path
+      required: true
+      schema: { type: string, minLength: 1 }
+    VesselIdPath:
+      name: vesselId
+      in: path
+      required: true
+      schema: { type: string, minLength: 1 }
+    ListLimit:
+      name: limit
+      in: query
+      required: false
+      description: Bounded page size.
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+    IfMatchHeader:
+      name: If-Match
+      in: header
+      required: true
+      description: The expected current `version` of the Catch Record (optimistic concurrency).
+      schema: { type: string, pattern: "^[1-9]\\d*$" }
+    IdempotencyKeyHeader:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: Optional caller-supplied key enabling safe replay of the same request.
+      schema: { type: string, minLength: 1, maxLength: 256 }
+
+  responses:
+    BadRequestError:
+      description: The request failed transport/shape validation.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    UnauthorizedError:
+      description: No valid bearer token was supplied.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    ForbiddenError:
+      description: The authenticated caller is not permitted to perform this operation.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    NotFoundError:
+      description: No matching resource exists for this owner.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    UnprocessableEntityError:
+      description: The request was well-formed but failed a business validation rule.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    BadGatewayError:
+      description: An upstream dependency (e.g. the Reference Data Service) returned an invalid response.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    ServiceUnavailableError:
+      description: An upstream dependency is currently unavailable.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    GatewayTimeoutError:
+      description: An upstream dependency timed out.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  schemas:
+    ExampleEntity:
+      type: object
+      description: >-
+        An arbitrary document from the generic service-skeleton template's `example-data` collection.
+        No fixed schema is enforced by this route.
+      additionalProperties: true
+
+    PersistedStatus:
+      type: string
+      enum: [DRAFT, SUBMITTED, COMPLETE]
+      description: The only three statuses ever persisted.
+
+    DisplayStatus:
+      type: string
+      enum: [Draft, Amended, Submitted, Complete]
+      description: Derived display status — never persisted.
+
+    PublicArtifactType:
+      type: string
+      enum: [json, pdf]
+
+    ErrorDetail:
+      type: object
+      description: One safe, sanitised validation or business-rule detail.
+      properties:
+        path: { type: string }
+        code: { type: string }
+        message: { type: string }
+        min: { type: number }
+        max: { type: number }
+        format: { type: string }
+        allowedValues:
+          type: array
+          items:
+            oneOf:
+              - { type: string }
+              - { type: number }
+              - { type: boolean }
+
+    ErrorResponse:
+      type: object
+      description: The one safe public error shape produced by the service's central error boundary.
+      required: [statusCode, code, message]
+      properties:
+        statusCode: { type: integer }
+        code: { type: string }
+        message: { type: string }
+        correlationId:
+          type: string
+          description: Present only when a trace id was available for this request.
+        details:
+          type: array
+          items: { $ref: "#/components/schemas/ErrorDetail" }
+      examples:
+        - statusCode: 404
+          code: CATCH_RECORD_NOT_FOUND
+          message: The requested catch record could not be found.
+          correlationId: 4c2c4e3a-0000-4000-8000-000000000000
+
+    Port:
+      type: object
+      required: [id, codeSnapshot, nameSnapshot]
+      properties:
+        id: { type: string }
+        codeSnapshot: { type: string }
+        nameSnapshot: { type: string }
+
+    VesselSnapshot:
+      type: object
+      required: [id, rssSnapshot, nameSnapshot, externalMarkSnapshot]
+      properties:
+        id: { type: string }
+        rssSnapshot: { type: string }
+        nameSnapshot: { type: string }
+        externalMarkSnapshot: { type: string }
+        lengthOverallMetresSnapshot: { type: number }
+
+    Trip:
+      type: object
+      required:
+        [startedAndFinishedToday, dateStarted, dateEnded, departurePort, returnPort]
+      properties:
+        startedAndFinishedToday: { type: boolean }
+        dateStarted: { type: string }
+        dateEnded: { type: string }
+        departurePort: { $ref: "#/components/schemas/Port" }
+        returnPort: { $ref: "#/components/schemas/Port" }
+
+    PairFishing:
+      type: object
+      required: [enabled, pairVessel, pairSkipperName]
+      properties:
+        enabled: { type: boolean }
+        pairVessel:
+          description: "`null` when `enabled` is `false`; populated shape not yet approved."
+          type: ["string", "null"]
+        pairSkipperName:
+          description: "`null` when `enabled` is `false`; populated shape not yet approved."
+          type: ["string", "null"]
+
+    Characteristic:
+      type: object
+      required: [characteristicId, nameSnapshot, value]
+      properties:
+        characteristicId: { type: string }
+        nameSnapshot: { type: string }
+        value:
+          oneOf:
+            - { type: number }
+            - { type: string }
+            - { type: boolean }
+        unitSnapshot: { type: string }
+
+    StatisticalArea:
+      type: object
+      required: [id, codeSnapshot, nameSnapshot]
+      properties:
+        id: { type: string }
+        codeSnapshot: { type: string }
+        nameSnapshot: { type: string }
+
+    SpeciesWeightEntry:
+      type: object
+      description: >-
+        Shared shape for both a gear's `speciesCaught` entries and the root `speciesNotLanded` entries.
+      required: [id, faoCodeSnapshot, nameSnapshot]
+      properties:
+        id: { type: string }
+        faoCodeSnapshot: { type: string }
+        nameSnapshot: { type: string }
+        weightAboveMinimumKg: { type: ["number", "null"] }
+        weightBelowMinimumKg: { type: ["number", "null"] }
+        weightLegallyDiscardedKg: { type: ["number", "null"] }
+        weightPrecision:
+          type: string
+          enum: [wholeNumber, oneDecimalPlace]
+
+    GearAssociation:
+      type: object
+      description: One gear occurrence — the authoritative root for its characteristics, statistical area, and landed species.
+      required: [associationId, gear, characteristics, speciesCaught]
+      properties:
+        associationId: { type: string }
+        gear:
+          type: object
+          required: [id, codeSnapshot, nameSnapshot]
+          properties:
+            id: { type: string }
+            codeSnapshot: { type: string }
+            nameSnapshot: { type: string }
+        characteristics:
+          type: array
+          items: { $ref: "#/components/schemas/Characteristic" }
+        statisticalArea: { $ref: "#/components/schemas/StatisticalArea" }
+        speciesCaught:
+          type: array
+          items: { $ref: "#/components/schemas/SpeciesWeightEntry" }
+
+    ArtifactMetadata:
+      type: object
+      required: [submissionNumber, type]
+      properties:
+        submissionNumber: { type: integer, minimum: 1 }
+        type:
+          type: string
+          enum: [JSON_SNAPSHOT, PDF_RECEIPT]
+
+    CatchRecord:
+      type: object
+      description: The authoritative Canonical Catch Record Object v1 — the current mutable operational record.
+      required:
+        - schemaVersion
+        - id
+        - catchRecordReference
+        - ownerUserId
+        - status
+        - version
+        - numberOfSubmissions
+        - hasUnsubmittedChanges
+        - vessel
+        - trip
+        - pairFishing
+        - gears
+        - speciesNotLanded
+        - artifacts
+        - createdAt
+        - createdBy
+        - updatedAt
+        - updatedBy
+        - submittedAt
+        - submittedBy
+        - completedAt
+        - completedBy
+      properties:
+        schemaVersion: { type: integer, const: 1 }
+        id: { type: string }
+        catchRecordReference: { type: string }
+        ownerUserId: { type: string }
+        status: { $ref: "#/components/schemas/PersistedStatus" }
+        version: { type: integer, minimum: 1 }
+        numberOfSubmissions: { type: integer, minimum: 0 }
+        hasUnsubmittedChanges: { type: boolean }
+        vessel: { $ref: "#/components/schemas/VesselSnapshot" }
+        trip: { $ref: "#/components/schemas/Trip" }
+        pairFishing: { $ref: "#/components/schemas/PairFishing" }
+        gears:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/GearAssociation" }
+        speciesNotLanded:
+          type: array
+          items: { $ref: "#/components/schemas/SpeciesWeightEntry" }
+        artifacts:
+          type: array
+          items: { $ref: "#/components/schemas/ArtifactMetadata" }
+        createdAt: { type: string, format: date-time }
+        createdBy: { type: string }
+        updatedAt: { type: string, format: date-time }
+        updatedBy: { type: string }
+        submittedAt: { type: ["string", "null"], format: date-time }
+        submittedBy: { type: ["string", "null"] }
+        completedAt: { type: ["string", "null"], format: date-time }
+        completedBy: { type: ["string", "null"] }
+
+    SectionCompletion:
+      type: object
+      required: [trip, pairFishing, gears]
+      properties:
+        trip: { type: boolean }
+        pairFishing: { type: boolean }
+        gears: { type: boolean }
+
+    Progress:
+      type: object
+      required:
+        [
+          hasUnsubmittedChanges,
+          numberOfSubmissions,
+          incompleteGearAssociationIds,
+          currentIncompleteGearAssociationId,
+          allGearsComplete,
+        ]
+      properties:
+        hasUnsubmittedChanges: { type: boolean }
+        numberOfSubmissions: { type: integer, minimum: 0 }
+        incompleteGearAssociationIds:
+          type: array
+          items: { type: string }
+        currentIncompleteGearAssociationId: { type: ["string", "null"] }
+        allGearsComplete: { type: boolean }
+
+    StandardSaveResponse:
+      type: object
+      required:
+        [
+          id,
+          catchRecordReference,
+          status,
+          displayStatus,
+          version,
+          savedSection,
+          sectionCompletion,
+          progress,
+        ]
+      properties:
+        id: { type: string }
+        catchRecordReference: { type: string }
+        status: { $ref: "#/components/schemas/PersistedStatus" }
+        displayStatus: { $ref: "#/components/schemas/DisplayStatus" }
+        version: { type: integer, minimum: 1 }
+        savedSection:
+          description: The canonical section name just saved, or `null` for first draft creation.
+          type: ["string", "null"]
+          enum: [null, trip, pairFishing, gears, speciesNotLanded]
+        sectionCompletion: { $ref: "#/components/schemas/SectionCompletion" }
+        progress: { $ref: "#/components/schemas/Progress" }
+
+    SubmissionResponse:
+      allOf:
+        - $ref: "#/components/schemas/StandardSaveResponse"
+        - type: object
+          required: [submittedAt, submittedBy, artifacts]
+          properties:
+            submittedAt: { type: string, format: date-time }
+            submittedBy: { type: string }
+            artifacts:
+              type: array
+              items: { $ref: "#/components/schemas/ArtifactMetadata" }
+
+    CompletionResponse:
+      allOf:
+        - $ref: "#/components/schemas/StandardSaveResponse"
+        - type: object
+          required: [completedAt, completedBy]
+          properties:
+            completedAt: { type: string, format: date-time }
+            completedBy: { type: string }
+
+    RetrieveCatchRecordResponse:
+      allOf:
+        - $ref: "#/components/schemas/CatchRecord"
+        - type: object
+          required:
+            [
+              displayStatus,
+              sectionCompletion,
+              completedSections,
+              incompleteSections,
+              progress,
+              submissionEligible,
+            ]
+          properties:
+            displayStatus: { $ref: "#/components/schemas/DisplayStatus" }
+            sectionCompletion: { $ref: "#/components/schemas/SectionCompletion" }
+            completedSections:
+              type: array
+              items: { type: string, enum: [trip, pairFishing, gears] }
+            incompleteSections:
+              type: array
+              items: { type: string, enum: [trip, pairFishing, gears] }
+            progress: { $ref: "#/components/schemas/Progress" }
+            submissionEligible:
+              type: boolean
+              description: >-
+                Preliminary eligibility fact only — a `true` value is not itself proof a submission
+                will be accepted.
+
+    CatchRecordListingItem:
+      type: object
+      required:
+        [
+          id,
+          catchRecordReference,
+          status,
+          displayStatus,
+          version,
+          vessel,
+          trip,
+          createdAt,
+          updatedAt,
+          submittedAt,
+          completedAt,
+          progress,
+        ]
+      properties:
+        id: { type: string }
+        catchRecordReference: { type: string }
+        status: { $ref: "#/components/schemas/PersistedStatus" }
+        displayStatus: { $ref: "#/components/schemas/DisplayStatus" }
+        version: { type: integer, minimum: 1 }
+        vessel:
+          type: object
+          properties:
+            nameSnapshot: { type: string }
+            rssSnapshot: { type: string }
+        trip:
+          type: object
+          properties:
+            dateStarted: { type: ["string", "null"] }
+            dateEnded: { type: ["string", "null"] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        submittedAt: { type: ["string", "null"], format: date-time }
+        completedAt: { type: ["string", "null"], format: date-time }
+        progress:
+          type: object
+          properties:
+            allGearsComplete: { type: boolean }
+
+    CatchRecordListResponse:
+      type: object
+      required: [items, limit, count]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/CatchRecordListingItem" }
+        limit: { type: integer }
+        count: { type: integer }
+
+    CatchRecordHistoryEvent:
+      type: object
+      required: [id, eventType, timestamp, actor]
+      properties:
+        id: { type: string }
+        eventType: { type: string }
+        timestamp: { type: string, format: date-time }
+        actor: { type: string }
+        section: { type: string }
+        submissionNumber: { type: integer }
+
+    CatchRecordHistoryResponse:
+      type: object
+      required:
+        [
+          catchRecordId,
+          status,
+          displayStatus,
+          version,
+          hasUnsubmittedChanges,
+          numberOfSubmissions,
+          events,
+        ]
+      properties:
+        catchRecordId: { type: string }
+        status: { $ref: "#/components/schemas/PersistedStatus" }
+        displayStatus: { $ref: "#/components/schemas/DisplayStatus" }
+        version: { type: integer, minimum: 1 }
+        hasUnsubmittedChanges: { type: boolean }
+        numberOfSubmissions: { type: integer, minimum: 0 }
+        events:
+          type: array
+          items: { $ref: "#/components/schemas/CatchRecordHistoryEvent" }
+
+    SubmissionArtifactSummary:
+      type: object
+      required: [type, contentType, contentLength, checksum]
+      properties:
+        type: { $ref: "#/components/schemas/PublicArtifactType" }
+        contentType: { type: string }
+        contentLength: { type: integer }
+        checksum: { type: string }
+
+    SubmissionGroup:
+      type: object
+      required: [submissionNumber, artifacts]
+      properties:
+        submissionNumber: { type: integer, minimum: 1 }
+        artifacts:
+          type: array
+          items: { $ref: "#/components/schemas/SubmissionArtifactSummary" }
+
+    SubmissionsListResponse:
+      type: object
+      required: [catchRecordId, count, submissions]
+      properties:
+        catchRecordId: { type: string }
+        count: { type: integer }
+        submissions:
+          type: array
+          items: { $ref: "#/components/schemas/SubmissionGroup" }
+
+    CreateDraftCatchRecordPayload:
+      type: object
+      required: [vesselId]
+      properties:
+        vesselId: { type: string, minLength: 1 }
+        catchRecordReference:
+          type: string
+          description: >-
+            Optional client-chosen friendly reference. Must match the same format the service's own
+            generator produces (`GBR-{RSS}-{DDMMYY}-{HHMMSS}`) and be unique; auto-generated when
+            omitted.
+          pattern: "^GBR-[A-Z0-9]+-\\d{6}-\\d{6}$"
+
+    SectionPatchPayload:
+      type: object
+      required: [section, data]
+      properties:
+        section:
+          type: string
+          enum: [trip, pairFishing, gears, speciesNotLanded]
+        data:
+          description: >-
+            A single nested object for `trip`/`pairFishing`, or an array of objects for the
+            collection-valued sections `gears`/`speciesNotLanded`. Business shape per section is
+            documented in `docs/canonical-catch-record.md` and `docs/running-locally-with-docker-compose.md`.
+          oneOf:
+            - type: object
+              additionalProperties: true
+            - type: array
+              items:
+                type: object
+                additionalProperties: true
+
+    CompleteReplacementPayload:
+      type: object
+      required: [vessel, trip, pairFishing, gears, speciesNotLanded]
+      properties:
+        vessel: { type: object, additionalProperties: true }
+        trip: { type: object, additionalProperties: true }
+        pairFishing: { type: object, additionalProperties: true }
+        gears:
+          type: array
+          items: { type: object, additionalProperties: true }
+        speciesNotLanded:
+          type: array
+          items: { type: object, additionalProperties: true }
+
+    FavouriteGearsResponse:
+      type: object
+      required: [vesselId, favouriteGearIds]
+      properties:
+        vesselId: { type: string }
+        favouriteGearIds:
+          type: array
+          items: { type: string }
+
+    FavouriteSpeciesResponse:
+      type: object
+      required: [vesselId, favouriteSpeciesIds]
+      properties:
+        vesselId: { type: string }
+        favouriteSpeciesIds:
+          type: array
+          items: { type: string }
+
+    FavouritePortsResponse:
+      type: object
+      required: [vesselId, favouritePortIds]
+      properties:
+        vesselId: { type: string }
+        favouritePortIds:
+          type: array
+          items: { type: string }
+
+    FavouriteGearPayload:
+      type: object
+      required: [gearId]
+      properties:
+        gearId: { type: string, minLength: 1 }
+
+    FavouriteSpeciesPayload:
+      type: object
+      required: [speciesId]
+      properties:
+        speciesId: { type: string, minLength: 1 }
+
+    FavouritePortPayload:
+      type: object
+      required: [portId]
+      properties:
+        portId: { type: string, minLength: 1 }
+
+    Skipper:
+      type: object
+      required: [id, name, phoneNumber, email]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        phoneNumber: { type: ["string", "null"] }
+        email: { type: ["string", "null"] }
+
+    SkipperPayload:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        phoneNumber: { type: string, minLength: 1, maxLength: 30 }
+        email: { type: string, format: email, maxLength: 254 }
+
+    SkippersResponse:
+      type: object
+      required: [vesselId, skippers]
+      properties:
+        vesselId: { type: string }
+        skippers:
+          type: array
+          items: { $ref: "#/components/schemas/Skipper" }
