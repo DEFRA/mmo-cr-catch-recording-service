@@ -85,7 +85,7 @@ capability-framework implementation, endpoint-security migration, and any produc
 - `@hapi/boom` + a single central `onPreResponse` error-mapping boundary
   (`src/plugins/error-mapping.js` → `src/common/helpers/errors/http-error-mapper.js`).
 - `convict` 6.2.5 for configuration (`src/config.js`), validated with `config.validate({ allowed:
-  'strict' })` at module load; one custom format exists today (`mongo-uri`).
+'strict' })` at module load; one custom format exists today (`mongo-uri`).
 - Vitest with v8 coverage; `vitest-fetch-mock` (`fetchMock` global) for outbound-HTTP tests;
   `vi.stubEnv`/`vi.resetModules()` precedent exists (`src/common/helpers/start-server.test.js`).
 - Working tree: clean. Branch `CRAR-33-Add-Entra-Exrernal-Athentication`. No pre-existing modified or
@@ -192,37 +192,37 @@ shape that `ownership-policy.js` and `completion-policy.js` already depend on.
 
 ## 9. Public and protected endpoint matrix
 
-| Method | Route | Handler/controller | Public/Protected | Confidence |
-| --- | --- | --- | --- | --- |
-| GET | `/health` | inline (`src/routes/health.js`) | Public | Confirmed |
-| GET | `/example` | `findAllExampleData` | Public | Confirmed |
-| GET | `/example/{exampleId}` | `findExampleData` | Public | Confirmed |
-| GET | `/openapi.json` | inline (`src/routes/openapi.js`) | Public | Confirmed |
-| GET | `/openapi.yaml` | inline (`src/routes/openapi.js`) | Public | Confirmed |
-| GET | `/v1/catch-records` | `listCatchRecordsHandler` | Protected | Confirmed |
-| POST | `/v1/catch-records` | `createDraftCatchRecordHandler` | Protected | Confirmed |
-| GET | `/v1/catch-records/{catchRecordId}` | `retrieveCatchRecordHandler` | Protected | Confirmed |
-| PUT | `/v1/catch-records/{catchRecordId}` | `replaceCatchRecordHandler` | Protected | Confirmed |
-| GET | `/v1/catch-records/{catchRecordId}/history` | `getCatchRecordHistoryHandler` | Protected | Confirmed |
-| DELETE | `/v1/catch-records/{catchRecordId}` | `abandonDraftCatchRecordHandler` | Protected | Confirmed |
-| PATCH | `/v1/catch-records/{catchRecordId}` | `saveCatchRecordSectionHandler` | Protected | Confirmed |
-| POST | `/v1/catch-records/{catchRecordId}/submission` | `submitCatchRecordHandler` | Protected | Confirmed |
-| GET | `/v1/catch-records/{catchRecordId}/submissions` | `listSubmissionArtifactsHandler` | Protected | Confirmed |
-| GET | `/v1/catch-records/{catchRecordId}/submissions/{submissionNumber}/{artifactType}` | `retrieveSubmissionArtifactHandler` | Protected | Confirmed |
-| POST | `/v1/catch-records/{catchRecordId}/completion` | `completeCatchRecordHandler` | Protected | Confirmed |
-| POST | `/v1/catch-records/{catchRecordId}/edit-start` | `startCatchRecordEditHandler` | Protected | Confirmed |
-| GET | `/v1/vessels/{vesselId}/favourite-gears` | `listFavouriteGears` | Protected | Confirmed |
-| POST | `/v1/vessels/{vesselId}/favourite-gears` | `addFavouriteGear` | Protected | Confirmed |
-| DELETE | `/v1/vessels/{vesselId}/favourite-gears/{gearId}` | `removeFavouriteGear` | Protected | Confirmed |
-| GET | `/v1/vessels/{vesselId}/favourite-species` | `listFavouriteSpecies` | Protected | Confirmed |
-| POST | `/v1/vessels/{vesselId}/favourite-species` | `addFavouriteSpecies` | Protected | Confirmed |
-| DELETE | `/v1/vessels/{vesselId}/favourite-species/{speciesId}` | `removeFavouriteSpecies` | Protected | Confirmed |
-| GET | `/v1/vessels/{vesselId}/favourite-ports` | `listFavouritePorts` | Protected | Confirmed |
-| POST | `/v1/vessels/{vesselId}/favourite-ports` | `addFavouritePort` | Protected | Confirmed |
-| DELETE | `/v1/vessels/{vesselId}/favourite-ports/{portId}` | `removeFavouritePort` | Protected | Confirmed |
-| GET | `/v1/vessels/{vesselId}/skippers` | `listSkippers` | Protected | Confirmed |
-| POST | `/v1/vessels/{vesselId}/skippers` | `addSkipperHandler` | Protected | Confirmed |
-| DELETE | `/v1/vessels/{vesselId}/skippers/{skipperId}` | `removeSkipperHandler` | Protected | Confirmed |
+| Method | Route                                                                             | Handler/controller                  | Public/Protected | Confidence |
+| ------ | --------------------------------------------------------------------------------- | ----------------------------------- | ---------------- | ---------- |
+| GET    | `/health`                                                                         | inline (`src/routes/health.js`)     | Public           | Confirmed  |
+| GET    | `/example`                                                                        | `findAllExampleData`                | Public           | Confirmed  |
+| GET    | `/example/{exampleId}`                                                            | `findExampleData`                   | Public           | Confirmed  |
+| GET    | `/openapi.json`                                                                   | inline (`src/routes/openapi.js`)    | Public           | Confirmed  |
+| GET    | `/openapi.yaml`                                                                   | inline (`src/routes/openapi.js`)    | Public           | Confirmed  |
+| GET    | `/v1/catch-records`                                                               | `listCatchRecordsHandler`           | Protected        | Confirmed  |
+| POST   | `/v1/catch-records`                                                               | `createDraftCatchRecordHandler`     | Protected        | Confirmed  |
+| GET    | `/v1/catch-records/{catchRecordId}`                                               | `retrieveCatchRecordHandler`        | Protected        | Confirmed  |
+| PUT    | `/v1/catch-records/{catchRecordId}`                                               | `replaceCatchRecordHandler`         | Protected        | Confirmed  |
+| GET    | `/v1/catch-records/{catchRecordId}/history`                                       | `getCatchRecordHistoryHandler`      | Protected        | Confirmed  |
+| DELETE | `/v1/catch-records/{catchRecordId}`                                               | `abandonDraftCatchRecordHandler`    | Protected        | Confirmed  |
+| PATCH  | `/v1/catch-records/{catchRecordId}`                                               | `saveCatchRecordSectionHandler`     | Protected        | Confirmed  |
+| POST   | `/v1/catch-records/{catchRecordId}/submission`                                    | `submitCatchRecordHandler`          | Protected        | Confirmed  |
+| GET    | `/v1/catch-records/{catchRecordId}/submissions`                                   | `listSubmissionArtifactsHandler`    | Protected        | Confirmed  |
+| GET    | `/v1/catch-records/{catchRecordId}/submissions/{submissionNumber}/{artifactType}` | `retrieveSubmissionArtifactHandler` | Protected        | Confirmed  |
+| POST   | `/v1/catch-records/{catchRecordId}/completion`                                    | `completeCatchRecordHandler`        | Protected        | Confirmed  |
+| POST   | `/v1/catch-records/{catchRecordId}/edit-start`                                    | `startCatchRecordEditHandler`       | Protected        | Confirmed  |
+| GET    | `/v1/vessels/{vesselId}/favourite-gears`                                          | `listFavouriteGears`                | Protected        | Confirmed  |
+| POST   | `/v1/vessels/{vesselId}/favourite-gears`                                          | `addFavouriteGear`                  | Protected        | Confirmed  |
+| DELETE | `/v1/vessels/{vesselId}/favourite-gears/{gearId}`                                 | `removeFavouriteGear`               | Protected        | Confirmed  |
+| GET    | `/v1/vessels/{vesselId}/favourite-species`                                        | `listFavouriteSpecies`              | Protected        | Confirmed  |
+| POST   | `/v1/vessels/{vesselId}/favourite-species`                                        | `addFavouriteSpecies`               | Protected        | Confirmed  |
+| DELETE | `/v1/vessels/{vesselId}/favourite-species/{speciesId}`                            | `removeFavouriteSpecies`            | Protected        | Confirmed  |
+| GET    | `/v1/vessels/{vesselId}/favourite-ports`                                          | `listFavouritePorts`                | Protected        | Confirmed  |
+| POST   | `/v1/vessels/{vesselId}/favourite-ports`                                          | `addFavouritePort`                  | Protected        | Confirmed  |
+| DELETE | `/v1/vessels/{vesselId}/favourite-ports/{portId}`                                 | `removeFavouritePort`               | Protected        | Confirmed  |
+| GET    | `/v1/vessels/{vesselId}/skippers`                                                 | `listSkippers`                      | Protected        | Confirmed  |
+| POST   | `/v1/vessels/{vesselId}/skippers`                                                 | `addSkipperHandler`                 | Protected        | Confirmed  |
+| DELETE | `/v1/vessels/{vesselId}/skippers/{skipperId}`                                     | `removeSkipperHandler`              | Protected        | Confirmed  |
 
 **Totals: 29 registered routes — 5 public, 24 protected, 0 unresolved.** All 24 protected routes use the
 literal Hapi `auth` option value `'authentication-service'` (constant `AUTH_STRATEGY` in both
@@ -231,29 +231,29 @@ partially-configured strategy.
 
 ## 10. Authentication component inventory
 
-| File | Symbol | Responsibility | Registration/caller | Confidence | Disposition |
-| --- | --- | --- | --- | --- | --- |
-| `src/catch-recording/controller/authentication-errors.js` | `authenticationRequiredError` | Shared `ApplicationError` factory for every authentication failure mode | `authentication-client.js`, `authentication-context.js`, `authentication-scheme.js` | Confirmed | Preserve |
-| `src/catch-recording/controller/authentication-client.js` | `createAuthenticationClient` | Framework-neutral bounded HTTP adapter to the Authentication Service (`/validate`) | `authentication-plugin.js` | Confirmed | Replace (Step 03/05 JWT validation replaces this network call) |
-| `src/catch-recording/controller/authentication-context.js` | `createAuthenticationContext` | Pure mapper `{ actorId, permissions }` → frozen `{ userId, scopes }` | `authentication-scheme.js` | Confirmed | Review (shape likely preserved; source of `scopes` changes with `vessel_roles`) |
-| `src/catch-recording/controller/authentication-scheme.js` | `authenticationServiceScheme`, `extractBearerToken` | Hapi custom auth scheme; sole trusted input is the `Authorization` header; audits outcome | `authentication-plugin.js` (`server.auth.scheme`) | Confirmed | Replace (Step 05 migrates this to Entra JWT validation) |
-| `src/catch-recording/controller/authentication-plugin.js` | `authenticationPlugin` | Registers the `authentication-service` scheme/strategy from plugin options | `src/server.js` | Confirmed | Replace (Step 05) |
-| `src/server.js` | plugin registration order/comment | Wires `authenticationPlugin` with `config.get('authentication')` before `router` | — | Confirmed (code); comment is stale — see §1 and §15 | Review |
-| `src/config.js` | `authentication.*` | `baseUrl`/`timeoutMs`/`retryCount`/`retryDelayMs` for the Authentication Service client | `src/server.js` | Confirmed | Preserve (unrelated to Entra config; stays as the legacy client's config until Step 15 removes the legacy client) |
-| `src/routes/catch-records.js`, `vessel-profiles.js` | `AUTH_STRATEGY = 'authentication-service'` | Opts every business route into the strategy | `src/plugins/router.js` | Confirmed | Replace (Step 05/11 point routes at the new strategy/capability authorization) |
+| File                                                       | Symbol                                              | Responsibility                                                                            | Registration/caller                                                                 | Confidence                                          | Disposition                                                                                                       |
+| ---------------------------------------------------------- | --------------------------------------------------- | ----------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- | --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `src/catch-recording/controller/authentication-errors.js`  | `authenticationRequiredError`                       | Shared `ApplicationError` factory for every authentication failure mode                   | `authentication-client.js`, `authentication-context.js`, `authentication-scheme.js` | Confirmed                                           | Preserve                                                                                                          |
+| `src/catch-recording/controller/authentication-client.js`  | `createAuthenticationClient`                        | Framework-neutral bounded HTTP adapter to the Authentication Service (`/validate`)        | `authentication-plugin.js`                                                          | Confirmed                                           | Replace (Step 03/05 JWT validation replaces this network call)                                                    |
+| `src/catch-recording/controller/authentication-context.js` | `createAuthenticationContext`                       | Pure mapper `{ actorId, permissions }` → frozen `{ userId, scopes }`                      | `authentication-scheme.js`                                                          | Confirmed                                           | Review (shape likely preserved; source of `scopes` changes with `vessel_roles`)                                   |
+| `src/catch-recording/controller/authentication-scheme.js`  | `authenticationServiceScheme`, `extractBearerToken` | Hapi custom auth scheme; sole trusted input is the `Authorization` header; audits outcome | `authentication-plugin.js` (`server.auth.scheme`)                                   | Confirmed                                           | Replace (Step 05 migrates this to Entra JWT validation)                                                           |
+| `src/catch-recording/controller/authentication-plugin.js`  | `authenticationPlugin`                              | Registers the `authentication-service` scheme/strategy from plugin options                | `src/server.js`                                                                     | Confirmed                                           | Replace (Step 05)                                                                                                 |
+| `src/server.js`                                            | plugin registration order/comment                   | Wires `authenticationPlugin` with `config.get('authentication')` before `router`          | —                                                                                   | Confirmed (code); comment is stale — see §1 and §15 | Review                                                                                                            |
+| `src/config.js`                                            | `authentication.*`                                  | `baseUrl`/`timeoutMs`/`retryCount`/`retryDelayMs` for the Authentication Service client   | `src/server.js`                                                                     | Confirmed                                           | Preserve (unrelated to Entra config; stays as the legacy client's config until Step 15 removes the legacy client) |
+| `src/routes/catch-records.js`, `vessel-profiles.js`        | `AUTH_STRATEGY = 'authentication-service'`          | Opts every business route into the strategy                                               | `src/plugins/router.js`                                                             | Confirmed                                           | Replace (Step 05/11 point routes at the new strategy/capability authorization)                                    |
 
 ## 11. Authorization-control inventory
 
-| File | Symbol | Classification | Registration/caller | Confidence | Disposition |
-| --- | --- | --- | --- | --- | --- |
-| `src/catch-recording/security/policy-outcome.js` | `POLICY_DECISIONS`, `allowOutcome`, `denyOutcome`, `isAllowed` | Unclear/mixed (shared contract, not itself a control) | Every policy module | Confirmed | Preserve |
-| `src/catch-recording/security/policy-errors.js` | `enforcePolicyOutcome` | Unclear/mixed (outcome→HTTP mapping, not itself a control) | Every controller enforcing a policy | Confirmed | Preserve |
-| `src/catch-recording/security/ownership-policy.js` | `decideOwnership` | Ownership authorization | `resource-access-policy.js` | Confirmed | Preserve |
-| `src/catch-recording/security/resource-access-policy.js` | `decideReadAccess`, `decideDraftUpdateAccess`, `decideDraftAbandonmentAccess`, `decideSubmissionAccess`, `decideAmendmentAccess`, `decideArtifactAccess` | Resource-level authorization | 6 Catch Record controllers (retrieve/save-section/abandon/submit/edit-start-amendment/submission-artifacts) | Confirmed | Preserve |
-| `src/catch-recording/security/vessel-access-policy.js` | `decideVesselAccess` | Vessel-scoped authorization | `vessel-resolution.js`, `vessel-profile-policy.js` | Confirmed | Review (its `accessibleVesselIds` *input source* changes in Step 06/07; the policy function itself is preserved) |
-| `src/catch-recording/security/vessel-profile-policy.js` | `decideVesselProfileAccess` | Vessel-scoped authorization | `vessel-profile-access.js`, `vessel-favourites.js`, `vessel-skippers.js` | Confirmed | Review (same as above) |
-| `src/catch-recording/security/completion-policy.js` | `decideCompletionAccess` | Permission-based authorization | `complete-catch-record.js` | Confirmed | Preserve (consumes `scopes`; source of `scopes` may later be influenced by `vessel_roles`, but the gate itself stays `scopes.includes('catch-recording.complete')`) |
-| `src/catch-recording/reference-data/vessel-resolution.js` | (composes Reference Data Service lookup + `decideVesselAccess`) | Vessel-scoped authorization composition | `create-draft-catch-record.js`, `replace-catch-record.js`, `vessel-profile-access.js` | Confirmed | Review (Reference Data Service vessel-permission source may be superseded by User Profile Service `vessel_roles`-derived roles per the phased plan's Step 06/07; this is an open migration question — see §21) |
+| File                                                      | Symbol                                                                                                                                                   | Classification                                             | Registration/caller                                                                                         | Confidence | Disposition                                                                                                                                                                                                    |
+| --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/catch-recording/security/policy-outcome.js`          | `POLICY_DECISIONS`, `allowOutcome`, `denyOutcome`, `isAllowed`                                                                                           | Unclear/mixed (shared contract, not itself a control)      | Every policy module                                                                                         | Confirmed  | Preserve                                                                                                                                                                                                       |
+| `src/catch-recording/security/policy-errors.js`           | `enforcePolicyOutcome`                                                                                                                                   | Unclear/mixed (outcome→HTTP mapping, not itself a control) | Every controller enforcing a policy                                                                         | Confirmed  | Preserve                                                                                                                                                                                                       |
+| `src/catch-recording/security/ownership-policy.js`        | `decideOwnership`                                                                                                                                        | Ownership authorization                                    | `resource-access-policy.js`                                                                                 | Confirmed  | Preserve                                                                                                                                                                                                       |
+| `src/catch-recording/security/resource-access-policy.js`  | `decideReadAccess`, `decideDraftUpdateAccess`, `decideDraftAbandonmentAccess`, `decideSubmissionAccess`, `decideAmendmentAccess`, `decideArtifactAccess` | Resource-level authorization                               | 6 Catch Record controllers (retrieve/save-section/abandon/submit/edit-start-amendment/submission-artifacts) | Confirmed  | Preserve                                                                                                                                                                                                       |
+| `src/catch-recording/security/vessel-access-policy.js`    | `decideVesselAccess`                                                                                                                                     | Vessel-scoped authorization                                | `vessel-resolution.js`, `vessel-profile-policy.js`                                                          | Confirmed  | Review (its `accessibleVesselIds` _input source_ changes in Step 06/07; the policy function itself is preserved)                                                                                               |
+| `src/catch-recording/security/vessel-profile-policy.js`   | `decideVesselProfileAccess`                                                                                                                              | Vessel-scoped authorization                                | `vessel-profile-access.js`, `vessel-favourites.js`, `vessel-skippers.js`                                    | Confirmed  | Review (same as above)                                                                                                                                                                                         |
+| `src/catch-recording/security/completion-policy.js`       | `decideCompletionAccess`                                                                                                                                 | Permission-based authorization                             | `complete-catch-record.js`                                                                                  | Confirmed  | Preserve (consumes `scopes`; source of `scopes` may later be influenced by `vessel_roles`, but the gate itself stays `scopes.includes('catch-recording.complete')`)                                            |
+| `src/catch-recording/reference-data/vessel-resolution.js` | (composes Reference Data Service lookup + `decideVesselAccess`)                                                                                          | Vessel-scoped authorization composition                    | `create-draft-catch-record.js`, `replace-catch-record.js`, `vessel-profile-access.js`                       | Confirmed  | Review (Reference Data Service vessel-permission source may be superseded by User Profile Service `vessel_roles`-derived roles per the phased plan's Step 06/07; this is an open migration question — see §21) |
 
 ## 12. Vessel, resource, ownership, and domain-rule inventory
 
@@ -265,7 +265,7 @@ partially-configured strategy.
 - **Domain/state-transition rules** (deliberately separate from authentication/authorization, per
   `docs/catch-recording-authorisation.md`'s "Purpose" section): `src/catch-recording/domain/
 lifecycle-transitions.js` — `canSubmitFirstTime`, `canComplete`, `canStartEdit`, `canResubmit`,
-  `canAbandon` each gate whether an *otherwise-authorized* operation is valid for the resource's current
+  `canAbandon` each gate whether an _otherwise-authorized_ operation is valid for the resource's current
   `PERSISTED_STATUSES` value (`DRAFT`/`SUBMITTED`/`COMPLETE`) and submission count. These rules influence
   whether an operation **succeeds**, not whether the caller is **authorized** to attempt it — both checks
   run independently and must both pass. **Disposition: Preserve** — entirely out of scope for the Entra
@@ -341,22 +341,22 @@ context shape, not on how it was produced.
 
 ## 16. Component migration disposition matrix
 
-| Component | Disposition | Reason |
-| --- | --- | --- |
-| `authentication-client.js` | Replace | Step 03/05 JWT validation replaces the Authentication Service HTTP call |
-| `authentication-scheme.js` | Replace | Step 05 migrates the Hapi scheme to Entra JWT validation |
-| `authentication-plugin.js` | Replace | Step 05 registers the new scheme/strategy instead |
-| `authentication-errors.js` | Preserve | The `ApplicationError`/`401` contract is framework-level, not transport-specific |
-| `authentication-context.js` | Review | `{ userId, scopes }` shape likely preserved; `scopes`' source changes |
-| `ownership-policy.js` | Preserve | Operates only on `userId`, unaffected by identity-transport change |
-| `resource-access-policy.js` | Preserve | Same as above |
-| `completion-policy.js` | Preserve | Operates only on `scopes`, unaffected by identity-transport change |
-| `vessel-access-policy.js` / `vessel-profile-policy.js` | Review | Policy function preserved; `accessibleVesselIds` input source may migrate from Reference Data Service to User Profile Service per Steps 06/07 — open question, see §21 |
-| `vessel-resolution.js` | Review | Composes Reference Data Service + `decideVesselAccess`; may need an alternate composition once `vessel_roles` exists |
-| Domain/lifecycle rules (`lifecycle-transitions.js`, `lifecycle-status.js`) | Out of scope | Entirely independent of authentication/authorization |
-| `src/config.js` `authentication.*` | Preserve until Step 15 | Legacy client config stays until mock authentication is removed |
-| Mock Authentication Service itself | Out of scope | Lives in a separate sibling repository (`mmo-cr-authentication-service`) |
-| All 24 business routes' `auth: 'authentication-service'` | Replace later | Step 05/11 repoint routes at the new strategy/capability authorization; unchanged in Phase 01 |
+| Component                                                                  | Disposition            | Reason                                                                                                                                                                 |
+| -------------------------------------------------------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `authentication-client.js`                                                 | Replace                | Step 03/05 JWT validation replaces the Authentication Service HTTP call                                                                                                |
+| `authentication-scheme.js`                                                 | Replace                | Step 05 migrates the Hapi scheme to Entra JWT validation                                                                                                               |
+| `authentication-plugin.js`                                                 | Replace                | Step 05 registers the new scheme/strategy instead                                                                                                                      |
+| `authentication-errors.js`                                                 | Preserve               | The `ApplicationError`/`401` contract is framework-level, not transport-specific                                                                                       |
+| `authentication-context.js`                                                | Review                 | `{ userId, scopes }` shape likely preserved; `scopes`' source changes                                                                                                  |
+| `ownership-policy.js`                                                      | Preserve               | Operates only on `userId`, unaffected by identity-transport change                                                                                                     |
+| `resource-access-policy.js`                                                | Preserve               | Same as above                                                                                                                                                          |
+| `completion-policy.js`                                                     | Preserve               | Operates only on `scopes`, unaffected by identity-transport change                                                                                                     |
+| `vessel-access-policy.js` / `vessel-profile-policy.js`                     | Review                 | Policy function preserved; `accessibleVesselIds` input source may migrate from Reference Data Service to User Profile Service per Steps 06/07 — open question, see §21 |
+| `vessel-resolution.js`                                                     | Review                 | Composes Reference Data Service + `decideVesselAccess`; may need an alternate composition once `vessel_roles` exists                                                   |
+| Domain/lifecycle rules (`lifecycle-transitions.js`, `lifecycle-status.js`) | Out of scope           | Entirely independent of authentication/authorization                                                                                                                   |
+| `src/config.js` `authentication.*`                                         | Preserve until Step 15 | Legacy client config stays until mock authentication is removed                                                                                                        |
+| Mock Authentication Service itself                                         | Out of scope           | Lives in a separate sibling repository (`mmo-cr-authentication-service`)                                                                                               |
+| All 24 business routes' `auth: 'authentication-service'`                   | Replace later          | Step 05/11 repoint routes at the new strategy/capability authorization; unchanged in Phase 01                                                                          |
 
 ## 17. Security findings
 
@@ -388,7 +388,7 @@ context shape, not on how it was produced.
 
 ## 19. Test gaps
 
-- No existing test asserts the *documentation* in `authentication-plugin.js`/`server.js` matches the
+- No existing test asserts the _documentation_ in `authentication-plugin.js`/`server.js` matches the
   routes' actual `auth` option — the drift in §15 was only found by direct code inspection, not caught by
   any test. (Not a functional gap; a documentation-accuracy gap.)
 - No dedicated `src/config.js` test exists today (confirmed: no `src/config.test.js` or equivalent in the
@@ -414,12 +414,12 @@ context shape, not on how it was produced.
 
 ## 22. Risks and controls
 
-| Risk | Control |
-| --- | --- |
-| A future step accidentally weakens the `NOT_FOUND`-on-mismatched-owner horizontal-enumeration protection | `resource-access-policy.test.js`/`ownership-policy.test.js` already assert this; must be preserved and kept passing through every later step |
-| A future step accidentally allows a non-RS256/non-approved JWT algorithm | Addressed directly by Step 02's `allowedAlgorithms` allow-list (this phase) and Step 03's eventual validator |
-| Documentation drift (stale "dormant" claims) misleads a future contributor | Recommend a trivial, separately-scoped follow-up fix to `authentication-plugin.js`'s docblock, `server.js`'s comment, and `docs/catch-recording-authentication.md`'s "Context shape"/"What Step 13 does not do" sections — out of scope for Phase 01 itself |
-| Local/CI environments silently run with authentication unconfigured | Already fails closed (`401`) today; no change required |
+| Risk                                                                                                     | Control                                                                                                                                                                                                                                                     |
+| -------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A future step accidentally weakens the `NOT_FOUND`-on-mismatched-owner horizontal-enumeration protection | `resource-access-policy.test.js`/`ownership-policy.test.js` already assert this; must be preserved and kept passing through every later step                                                                                                                |
+| A future step accidentally allows a non-RS256/non-approved JWT algorithm                                 | Addressed directly by Step 02's `allowedAlgorithms` allow-list (this phase) and Step 03's eventual validator                                                                                                                                                |
+| Documentation drift (stale "dormant" claims) misleads a future contributor                               | Recommend a trivial, separately-scoped follow-up fix to `authentication-plugin.js`'s docblock, `server.js`'s comment, and `docs/catch-recording-authentication.md`'s "Context shape"/"What Step 13 does not do" sections — out of scope for Phase 01 itself |
+| Local/CI environments silently run with authentication unconfigured                                      | Already fails closed (`401`) today; no change required                                                                                                                                                                                                      |
 
 ## 23. Recommended boundaries for Steps 02 through 15
 
