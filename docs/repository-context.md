@@ -73,17 +73,27 @@ Source: `package.json` (`"imports": { "#/*": "./src/*" }`), the file tree above.
 ## 6. Configuration
 
 - `convict@6.2.5` is the configuration library; the schema in `src/config.js` is validated with
-  `config.validate({ allowed: 'strict' })` at module load (`src/config.js`, final line).
-- `convict-format-with-validator` adds extra formats (e.g. `ipaddress`); a custom format
-  `convictValidateMongoUri` (`src/common/helpers/convict/validate-mongo-uri.js`) validates the Mongo URI
-  using a Joi `uri({ scheme: ['mongodb'] })` check.
+  `config.validate({ allowed: 'strict' })`, followed by one explicit cross-field check (Phase 01/Step 02 —
+  see below), at module load (`src/config.js`).
+- `convict-format-with-validator` adds extra formats (e.g. `ipaddress`); custom formats under
+  `src/common/helpers/convict/` validate values the built-in formats cannot: `convictValidateMongoUri`
+  (Mongo URI, a Joi `uri({ scheme: ['mongodb'] })` check), `convictValidateNonEmptyString`,
+  `convictValidateHttpsUrl`, `convictValidateBaseUrl`, `convictValidateAlgorithmAllowlist` (with a
+  `coerce` splitting a comma-separated env string into an array), and
+  `convictValidatePositiveIntegerSeconds` (with a `coerce` converting an env string to a number) — the
+  last four added by Phase 01/Step 02 for the `entra.*`/`authorization.*` settings.
 - Existing keys: `serviceVersion`, `host`, `port`, `serviceName`, `cdpEnvironment` (enum including
   `local`), `log.isEnabled`/`log.level`/`log.format`/`log.redact`, `mongo.mongoUrl`/
   `mongo.databaseName`/`mongo.mongoOptions.retryWrites`/`mongo.mongoOptions.readPreference`,
   `httpProxy`, `tracing.header`, `authentication.baseUrl`/`authentication.timeoutMs`/
   `authentication.retryCount`/`authentication.retryDelayMs` (Step 13 Authentication Service client),
   `referenceData.baseUrl`/`referenceData.serviceToken`/`referenceData.timeoutMs`/
-  `referenceData.retryCount`/`referenceData.retryDelayMs` (Step 15 Reference Data Service client)
+  `referenceData.retryCount`/`referenceData.retryDelayMs` (Step 15 Reference Data Service client),
+  `entra.issuer`/`entra.audience`/`entra.oidcMetadataUrl`/`entra.allowedAlgorithms` and
+  `authorization.rolesClaim`/`authorization.serviceId`/`authorization.roleDefinitionsUrl`/
+  `authorization.roleCacheTtlSeconds`/`authorization.roleCacheMaximumStaleSeconds` (Phase 01/Step 02 Entra
+  and authorization configuration foundation — not yet consumed by any running code; see
+  `docs/catch-recording-entra-and-authorization-configuration.md`)
   (`src/config.js`).
 - Every key has a `doc`, a `format`, and an `env` where environment-driven, consistent with
   `.github/instructions/nodejs-hapi-api.instructions.md` ("Configuration" section).

@@ -2,8 +2,18 @@ import convict from 'convict'
 import convictFormatWithValidator from 'convict-format-with-validator'
 
 import { convictValidateMongoUri } from '#/common/helpers/convict/validate-mongo-uri.js'
+import { convictValidateNonEmptyString } from '#/common/helpers/convict/validate-non-empty-string.js'
+import { convictValidateHttpsUrl } from '#/common/helpers/convict/validate-https-url.js'
+import { convictValidateBaseUrl } from '#/common/helpers/convict/validate-base-url.js'
+import { convictValidateAlgorithmAllowlist } from '#/common/helpers/convict/validate-algorithm-allowlist.js'
+import { convictValidatePositiveIntegerSeconds } from '#/common/helpers/convict/validate-positive-integer-seconds.js'
 
 convict.addFormat(convictValidateMongoUri)
+convict.addFormat(convictValidateNonEmptyString)
+convict.addFormat(convictValidateHttpsUrl)
+convict.addFormat(convictValidateBaseUrl)
+convict.addFormat(convictValidateAlgorithmAllowlist)
+convict.addFormat(convictValidatePositiveIntegerSeconds)
 convict.addFormats(convictFormatWithValidator)
 
 const isProduction = process.env.NODE_ENV === 'production'
@@ -227,7 +237,81 @@ export const config = convict({
       default: 200,
       env: 'CATCH_ARTIFACTS_MAX_PDF_RENDERED_ITEMS'
     }
+  },
+  entra: {
+    issuer: {
+      doc: 'Expected Microsoft Entra External ID token issuer (Phase 01/Step 02 configuration foundation only - not yet consumed; JWT validation is implemented in Step 03). Nullable/unset like `authentication.baseUrl` - no production requiredness gate exists yet because nothing consumes this value in this phase (user-confirmed decision, no approved activation contract exists).',
+      format: 'non-empty-string',
+      nullable: true,
+      default: null,
+      env: 'ENTRA_ISSUER'
+    },
+    audience: {
+      doc: 'Expected Microsoft Entra External ID token audience (API identifier). Distinct from `issuer` and from any scope/client identifier. Not yet consumed - see `entra.issuer` doc.',
+      format: 'non-empty-string',
+      nullable: true,
+      default: null,
+      env: 'ENTRA_AUDIENCE'
+    },
+    oidcMetadataUrl: {
+      doc: 'Approved OpenID Connect metadata endpoint for Microsoft Entra External ID. Must be an absolute `https://` URL - no approved local/test HTTP exception exists, so none is permitted. Not yet consumed - see `entra.issuer` doc.',
+      format: 'https-url',
+      nullable: true,
+      default: null,
+      env: 'ENTRA_OIDC_METADATA_URL'
+    },
+    allowedAlgorithms: {
+      doc: 'Explicit JWT signing-algorithm allowlist for future Entra token validation. `RS256` is the only initially-approved algorithm; `none` and symmetric algorithms (e.g. `HS256`) are always rejected. Not yet consumed - see `entra.issuer` doc.',
+      format: 'algorithm-allowlist',
+      default: ['RS256'],
+      env: 'ENTRA_ALLOWED_ALGORITHMS'
+    }
+  },
+  authorization: {
+    rolesClaim: {
+      doc: 'Name of the future Entra token claim carrying vessel roles. Approved default `vessel_roles`. Claim extraction itself is implemented in Step 06 - this is configuration only.',
+      format: 'non-empty-string',
+      default: 'vessel_roles',
+      env: 'AUTHORIZATION_ROLES_CLAIM'
+    },
+    serviceId: {
+      doc: "This service's own identifier when requesting role definitions from the User Profile Service. Approved default `catch-recording`. Not yet consumed - the User Profile Service client is implemented in Step 07.",
+      format: 'non-empty-string',
+      default: 'catch-recording',
+      env: 'AUTHORIZATION_SERVICE_ID'
+    },
+    roleDefinitionsUrl: {
+      doc: 'User Profile Service **base URL** (user-confirmed contract: a base URL, mirroring `authentication.baseUrl`/`referenceData.baseUrl` - the Step 07 client appends `/roles-definitions/services/{serviceId}`). Nullable/unset like those existing base URLs; not yet consumed.',
+      format: 'base-url',
+      nullable: true,
+      default: null,
+      env: 'USER_PROFILE_SERVICE_URL'
+    },
+    roleCacheTtlSeconds: {
+      doc: 'User-approved duration (seconds) after which the Step 08 role-definition cache must refresh. Must be a positive integer. Not yet consumed - the cache itself is implemented in Step 08.',
+      format: 'positive-integer-seconds',
+      default: 600,
+      env: 'AUTHORIZATION_ROLE_CACHE_TTL_SECONDS'
+    },
+    roleCacheMaximumStaleSeconds: {
+      doc: 'User-approved maximum age (seconds) at which the Step 08 role-definition cache may still serve previously-validated data during a User Profile Service outage. Must be a positive integer greater than or equal to `roleCacheTtlSeconds` (enforced immediately below, since convict cannot express a cross-field relationship in a single format). Not yet consumed - see `roleCacheTtlSeconds` doc.',
+      format: 'positive-integer-seconds',
+      default: 6000,
+      env: 'AUTHORIZATION_ROLE_CACHE_MAX_STALE_SECONDS'
+    }
   }
 })
 
 config.validate({ allowed: 'strict' })
+
+// Convict validates each property independently; this relationship spans two properties, so it is
+// checked explicitly, immediately after the standard schema validation above, following the same
+// "fail fast and loud at module load" convention.
+if (
+  config.get('authorization.roleCacheMaximumStaleSeconds') <
+  config.get('authorization.roleCacheTtlSeconds')
+) {
+  throw new Error(
+    'authorization.roleCacheMaximumStaleSeconds must be greater than or equal to authorization.roleCacheTtlSeconds'
+  )
+}

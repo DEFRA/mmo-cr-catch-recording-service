@@ -548,9 +548,34 @@ remained unresolved until now. Resolved with the user as follows:
 - **Authentication**: out of scope for this phase's decisions — the existing mock Authentication Service
   (Step 13) already trusts/authorises every request; Step 39 introduces no new authentication mechanics.
 
+## Phase 01 decisions (Entra programme) — Step 02
+
+> Recorded for `design/github-prompts/step-02-introduce-entra-and-authorization-configuration.md`. The
+> full settings table lives in
+> [`docs/catch-recording-entra-and-authorization-configuration.md`](./catch-recording-entra-and-authorization-configuration.md).
+> The Clarification Resolver agent confirmed none of the following three items was resolvable from any
+> approved design document or repository convention; each was then confirmed directly by the user before
+> implementation, following this file's own established "no speculative value" precedent.
+
+- **Entra "active" activation contract**: no new startup-time "is Entra active" gate is introduced.
+  `entra.*` stays `nullable`/`default: null` in every environment, mirroring
+  `authentication.baseUrl`/`referenceData.baseUrl`'s existing precedent (also never gated by
+  `cdpEnvironment` or `NODE_ENV` today). Real required-field enforcement is deferred to the step that
+  actually consumes each value (Step 03 onward).
+- **`authorization.roleDefinitionsUrl` contract**: a User Profile Service **base URL** (mirroring
+  `authentication.baseUrl`/`referenceData.baseUrl`) — the Step 07 client will append
+  `/roles-definitions/services/{serviceId}`, not a complete endpoint URL stored directly.
+- **Role-definition cache durations**: `roleCacheTtlSeconds = 600` seconds, `roleCacheMaximumStaleSeconds
+= 6000` seconds (both user-approved; `6000 >= 600` satisfies the required TTL/stale relationship). These
+  values configure the Step 08 cache; Step 02 itself implements no caching behaviour.
+
 ## Security and privacy
 
 No credential, token, access key, or secret key is introduced by this step (none was added — there is no
 new configuration at all). Nothing in this document reproduces a secret value; the local `floci` S3-
 emulator credentials referenced above are the well-known public dummy values used by that local tool, not
 a real secret, and are not reproduced here regardless.
+
+The Phase 01/Step 02 Entra and authorization settings recorded above are likewise not secrets (issuer,
+audience, metadata URL, roles claim, service ID, cache durations, and the User Profile Service base URL
+are all public, non-sensitive identifiers); no credential or signing key is introduced by that step either.
