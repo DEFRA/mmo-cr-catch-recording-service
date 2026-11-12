@@ -206,3 +206,41 @@ Decisions recorded:
 
 Open item for Step 09: the design's examples show assigned roles such as `VRO5--Owner` while definitions
 list `Owner`; how an assigned role id is matched to a definition is a Step 09 concern and is resolved there.
+
+## User-role cache (Step 07)
+
+Code: `src/authorization/user-role-cache.js`; registered once by the `userRoleCache` plugin
+(`src/plugins/user-role-cache.js`) as `server.userRoleCache` (`null` only when authorization is unconfigured
+in local development; cleared on server stop). It is not yet used by any request path.
+
+`getUserRoles(user, { correlationId, signal })` returns `{ ok: true, value, cacheState: 'hit' | 'refreshed' }`
+or the typed failure of the stage that failed: `{ source: 'dependency' }` (Step 05), `{ source:
+'validation' }` (Step 06) or `{ source: 'cache', reason }` (an untrusted user context or an unexpected
+error). Failures are never cached and never become an empty role set.
+
+- **Key and value.** Keyed only by the trusted stable user identifier. A cache entry holds only the Step
+  06 validated, frozen model (`userId`, `roleIds`, `definitionsVersion`) plus local load and expiry times.
+  No token, claim, DTO, JSON, header, response object, capability or role definition is stored.
+- **TTL.** `expiresAt` = successful refresh time + `authorization.userRoleCacheTtlSeconds` (initially
+  `300`), measured on a monotonic clock. **Fresh while `now < expiresAt`; expired from `now >= expiresAt`.**
+  A role removal therefore takes effect no later than the TTL after the last successful retrieval (plus any
+  request already in progress).
+- **No stale use.** An expired entry is never returned - not even when the refresh fails - and a failed
+  refresh never extends it. There is no maximum-stale period for user roles (that belongs to role
+  definitions, Step 08). Refresh failure with no usable entry is returned as a failure; Step 12 will map it.
+- **No-role users.** A valid response with no roles (how the contract represents an unknown user) is
+  cached for the normal TTL and yields an empty `roleIds`, never a default role.
+- **Single-flight.** Concurrent lookups for one user share one refresh; different users refresh
+  independently and no lock is held across I/O. A caller that cancels stops waiting without cancelling the
+  shared refresh. Coordination state is released on success, failure and exception and is bounded by the
+  number of in-flight users.
+- **Atomic publication and ordering.** A complete validated entry replaces the previous one in a single
+  operation; an older refresh result never replaces a newer entry.
+- **Capacity.** At most `authorization.userRoleCacheMaximumEntries` users. When full, expired entries are
+  removed first, then the least recently used entry (a hit counts as use). No per-entry timers or
+  background scanning.
+- **Process-local.** Each instance has its own cache, so roles may differ between instances for up to the
+  TTL, and a restart empties it. There is no distributed cache.
+- **Logging.** Debug events (hit, miss, expired, refresh started/succeeded/failed/coalesced, inserted,
+  replaced, evicted, capacity reached) carry no user identifier, role, token or response body; metrics are
+  part of Step 13.
