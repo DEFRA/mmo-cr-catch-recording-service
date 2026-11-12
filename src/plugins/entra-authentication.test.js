@@ -1,5 +1,6 @@
 import Hapi from '@hapi/hapi'
 
+import { getAuthenticatedUser } from '#/authentication/entra/authenticated-user-context.js'
 import { errorMapping } from '#/plugins/error-mapping.js'
 import {
   entraAuthentication,
@@ -15,6 +16,8 @@ import {
   TEST_JWKS_URI,
   TEST_METADATA_URL
 } from '#/authentication/entra/entra-test-fixtures.js'
+
+const TEST_USER_ID = '00000000-0000-4000-8000-000000000001'
 
 const entra = {
   issuer: TEST_ISSUER,
@@ -40,9 +43,16 @@ async function createTestServer({ entraConfig = entra, fetchFn }) {
     path: '/protected',
     options: { auth: ENTRA_AUTH_STRATEGY },
     handler: (request) => ({
+      user: getAuthenticatedUser(request),
       credentials: request.auth.credentials,
       artifacts: request.auth.artifacts ?? null
     })
+  })
+  server.route({
+    method: 'POST',
+    path: '/protected/{userId}',
+    options: { auth: ENTRA_AUTH_STRATEGY },
+    handler: (request) => ({ user: getAuthenticatedUser(request) })
   })
   server.route({
     method: 'GET',
@@ -85,14 +95,90 @@ describe('#entraAuthentication', () => {
       headers: authorization ? { authorization } : {}
     })
 
-  test('Should authenticate a valid Entra access token without exposing any claim or identity', async () => {
+  test('Should authenticate a valid Entra access token with only the trusted user identifier', async () => {
     const token = await signTestToken(signing)
 
     const response = await get(`Bearer ${token}`)
 
     expect(response.statusCode).toBe(200)
-    expect(response.result).toEqual({ credentials: {}, artifacts: null })
-    expect(response.payload).not.toContain('oid')
+    expect(response.result).toEqual({
+      user: { userId: TEST_USER_ID },
+      credentials: { userId: TEST_USER_ID },
+      artifacts: null
+    })
+  })
+
+  test('Should reject a validly signed token whose configured identity claim is missing', async () => {
+    const token = await signTestToken(signing, { claims: { oid: undefined } })
+
+    const response = await get(`Bearer ${token}`)
+
+    expect(response.statusCode).toBe(401)
+    expect(response.payload).not.toMatch(/oid|claim/i)
+  })
+
+  test.each([
+    ['a non-string identity', { oid: 42 }],
+    ['a multi-valued identity', { oid: [TEST_USER_ID, 'other'] }],
+    ['a malformed identity', { oid: '../admin' }],
+    ['an empty identity', { oid: '' }]
+  ])('Should reject a validly signed token with %s', async (_name, claims) => {
+    const token = await signTestToken(signing, { claims })
+
+    const response = await get(`Bearer ${token}`)
+
+    expect(response.statusCode).toBe(401)
+  })
+
+  test('Should never let request-controlled data replace the token-derived identity', async () => {
+    const token = await signTestToken(signing)
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/protected/attacker-from-path?userId=attacker-from-query',
+      headers: {
+        authorization: `Bearer ${token}`,
+        'x-user-id': 'attacker-from-header',
+        'x-correlation-id': 'attacker-correlation',
+        cookie: 'userId=attacker-from-cookie'
+      },
+      payload: { userId: 'attacker-from-body', oid: 'attacker-from-body' }
+    })
+
+    expect(response.result).toEqual({ user: { userId: TEST_USER_ID } })
+  })
+
+  test('Should keep concurrent requests isolated to their own identity', async () => {
+    const tokens = await Promise.all(
+      ['user-a', 'user-b', 'user-c', 'user-d'].map((oid) =>
+        signTestToken(signing, { claims: { oid } })
+      )
+    )
+
+    const responses = await Promise.all(
+      [...tokens, ...tokens].map((token) => get(`Bearer ${token}`))
+    )
+
+    expect(responses.map((response) => response.result.user.userId)).toEqual([
+      'user-a',
+      'user-b',
+      'user-c',
+      'user-d',
+      'user-a',
+      'user-b',
+      'user-c',
+      'user-d'
+    ])
+  })
+
+  test('Should leave no trusted user after a failed authentication', async () => {
+    const validToken = await signTestToken(signing)
+    await get(`Bearer ${validToken}`)
+
+    const response = await get('Bearer read-token')
+
+    expect(response.statusCode).toBe(401)
+    expect(response.result).not.toHaveProperty('user')
   })
 
   test.each([

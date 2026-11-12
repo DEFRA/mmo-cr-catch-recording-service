@@ -91,3 +91,33 @@ Deferred: user identity (Step 04), `503` for key-dependency failures and the fin
 (Step 12), telemetry (Step 13).
 
 Open item for the Identity/DevOps owners: confirm whether a bounded clock tolerance is required.
+
+## Trusted authenticated-user context (Step 04)
+
+Code: `src/authentication/entra/authenticated-user-context.js`; wired into the `entra-bearer` strategy
+(`entra-authentication-scheme.js`).
+
+Request pipeline: read the bearer credential, validate the token completely (Step 03), extract the single
+configured identity claim, create the context, and only then continue. A failure at any stage stops the
+request with the generic `401 AUTHENTICATION_REQUIRED`; a failed request has no context.
+
+- **One claim, no fallback.** Exactly `entra.userIdClaim` is read (own property of the validated claims
+  only). `oid`, `sub`, `email`, `preferred_username` and similar are never substituted or combined.
+- **Rejected:** missing, `null`, non-string (number, boolean, object), array (including single-element
+  and multi-valued), empty, whitespace-only, padded, over-long (more than 128 characters) or containing
+  anything outside `A-Z a-z 0-9 . _ ~ -` (so no control characters, spaces, path separators or percent
+  escapes can reach the User Profile Service URL).
+- **Opaque identifier.** The approved design leaves the claim configurable (`oid` is a GUID, `sub` is an
+  opaque string) and the mock User Profile Service uses non-GUID identifiers, so no GUID constraint is
+  imposed and the value is preserved exactly (no case folding). Assumption recorded; confirm the final
+  claim with the Identity/DevOps owners.
+- **Context.** `Object.freeze({ userId })` - no token, claims, roles, scopes, capabilities, e-mail, name
+  or profile data. It is the request's Hapi credentials, so it is request-scoped (no module-level
+  "current user"); concurrent requests cannot observe each other's identity.
+- **Accessor.** Downstream code calls `getAuthenticatedUser(request)`. It returns the context only for a
+  request authenticated by `entra-bearer` with a context created by this module, and `null` otherwise -
+  so a legacy `authentication-service` principal, or any look-alike object, never satisfies it. It never
+  reads a body, query, route parameter, header or cookie, so request data cannot override the caller.
+- **Transition.** The legacy strategy is unchanged and no route uses `entra-bearer` yet; there is no
+  fallback from a failed Entra authentication to a mock identity. Step 05 will use `userId` to build the
+  user-roles request; roles, caching and capabilities are not part of this step.

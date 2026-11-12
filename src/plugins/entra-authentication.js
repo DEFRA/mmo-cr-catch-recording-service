@@ -1,11 +1,13 @@
 import { createAccessTokenValidator } from '#/authentication/entra/access-token-validator.js'
+import { ENTRA_AUTH_STRATEGY } from '#/authentication/entra/entra-auth-strategy.js'
 import { entraAuthenticationScheme } from '#/authentication/entra/entra-authentication-scheme.js'
 
-export const ENTRA_AUTH_STRATEGY = 'entra-bearer'
+export { ENTRA_AUTH_STRATEGY }
 
 /**
- * Registers the `entra-bearer` Hapi authentication strategy, validating Entra access tokens locally
- * with the shared signing-key provider (`server.entraSigningKeyProvider`). Dormant: no route opts in yet.
+ * Registers the `entra-bearer` Hapi authentication strategy: validates Entra access tokens locally with
+ * the shared signing-key provider (`server.entraSigningKeyProvider`) and establishes the trusted
+ * authenticated-user context from `entra.userIdClaim` (`getAuthenticatedUser`). Dormant: no route opts in yet.
  * When Entra is not configured (local development only) every token is rejected - it never falls back
  * to any other form of authentication.
  */
@@ -26,7 +28,8 @@ export const entraAuthentication = {
 
       server.auth.scheme(ENTRA_AUTH_STRATEGY, entraAuthenticationScheme)
       server.auth.strategy(ENTRA_AUTH_STRATEGY, ENTRA_AUTH_STRATEGY, {
-        validator
+        validator,
+        userIdClaim: entra.userIdClaim
       })
     }
   }

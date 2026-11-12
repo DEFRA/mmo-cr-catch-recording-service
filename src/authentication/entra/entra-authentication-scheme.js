@@ -1,34 +1,46 @@
 import { authenticationRequiredError } from '#/catch-recording/controller/authentication-errors.js'
+import { createAuthenticatedUserContext } from './authenticated-user-context.js'
 
 /**
  * Hapi custom authentication scheme backed by the Entra access-token validator. The only trusted input
- * is the standard `Authorization` header; it is validated once per request, and a failure stops the
- * request with the existing controlled authentication failure.
+ * is the standard `Authorization` header. The request pipeline is: validate the token completely, then
+ * extract the single configured stable identity claim, then expose the minimal authenticated-user context
+ * as the request's credentials (read it with `getAuthenticatedUser`). A failure at either stage stops the
+ * request with the existing generic authentication failure; no context exists for a failed request and
+ * nothing falls back to another identity.
  *
- * Step 03 establishes token validation only. A successful validation authenticates the request with an
- * empty credentials object: no claim is propagated and no user identity exists until the trusted
- * authenticated-user context is added (Step 04). The failure reason is kept as the internal `cause` for
- * logs and is never serialised publicly; mapping key-dependency failures to `503` is Step 12.
+ * The failure reason is kept as the internal `cause` only and is never serialised publicly; mapping
+ * key-dependency failures to `503` is Step 12.
  *
  * @param {import('@hapi/hapi').Server} _server
- * @param {{ validator: { validate: Function } }} options
+ * @param {{ validator: { validate: Function }, userIdClaim: string | null }} options
  */
 export function entraAuthenticationScheme(_server, options) {
-  const { validator } = options
+  const { validator, userIdClaim } = options
+
+  const reject = (h, reason) =>
+    h.unauthenticated(
+      authenticationRequiredError(
+        new Error(`Entra authentication failed: ${reason}`)
+      )
+    )
 
   return {
     authenticate: async (request, h) => {
-      const result = await validator.validate(request.headers.authorization)
-
-      if (!result.ok) {
-        return h.unauthenticated(
-          authenticationRequiredError(
-            new Error(`Entra token validation failed: ${result.reason}`)
-          )
-        )
+      const validation = await validator.validate(request.headers.authorization)
+      if (!validation.ok) {
+        return reject(h, validation.reason)
       }
 
-      return h.authenticated({ credentials: Object.freeze({}) })
+      const identity = createAuthenticatedUserContext(
+        validation.claims,
+        userIdClaim
+      )
+      if (!identity.ok) {
+        return reject(h, identity.reason)
+      }
+
+      return h.authenticated({ credentials: identity.user })
     }
   }
 }
