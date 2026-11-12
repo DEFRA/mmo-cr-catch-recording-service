@@ -14,6 +14,10 @@ const isTest = process.env.NODE_ENV === 'test'
 // configuration. Outside tests, every trust-boundary value has no default and must be supplied.
 const testValue = (value) => (isTest ? value : null)
 
+const TEST_METADATA_REFRESH_INTERVAL_SECONDS = 3600
+const TEST_REQUEST_TIMEOUT_MS = 2000
+const TEST_DEFINITIONS_MAXIMUM_STALE_SECONDS = 300
+
 export const config = convict({
   serviceVersion: {
     doc: 'The service version, this variable is injected into your docker container in CDP environments',
@@ -179,7 +183,7 @@ export const config = convict({
       doc: 'Seconds after which cached OIDC metadata and signing keys are refreshed on the normal refresh policy',
       format: 'nat',
       nullable: true,
-      default: isTest ? 3600 : null,
+      default: isTest ? TEST_METADATA_REFRESH_INTERVAL_SECONDS : null,
       env: 'ENTRA_METADATA_REFRESH_INTERVAL_SECONDS'
     },
     minimumRefreshIntervalSeconds: {
@@ -193,7 +197,7 @@ export const config = convict({
       doc: 'Timeout in milliseconds for OIDC metadata and JWKS requests',
       format: 'nat',
       nullable: true,
-      default: isTest ? 2000 : null,
+      default: isTest ? TEST_REQUEST_TIMEOUT_MS : null,
       env: 'ENTRA_REQUEST_TIMEOUT_MS'
     }
   },
@@ -246,7 +250,7 @@ export const config = convict({
       doc: 'Additional seconds, after the snapshot stops being fresh, during which the last validated snapshot may still be used when a refresh fails (total usable age is TTL plus this value)',
       format: 'nat',
       nullable: true,
-      default: isTest ? 300 : null,
+      default: isTest ? TEST_DEFINITIONS_MAXIMUM_STALE_SECONDS : null,
       env: 'AUTHORIZATION_ROLE_DEFINITIONS_CACHE_MAXIMUM_STALE_SECONDS'
     },
     userProfileRequestTimeoutMs: {

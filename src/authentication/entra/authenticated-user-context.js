@@ -18,6 +18,15 @@ const trustedContexts = new WeakSet()
 
 const failure = (reason) => ({ ok: false, reason })
 
+/** Own, non-null claim value, or `undefined` when the claim is absent. */
+function readOwnClaim(claims, name) {
+  if (claims === null || typeof claims !== 'object') {
+    return undefined
+  }
+
+  return Object.hasOwn(claims, name) ? (claims[name] ?? undefined) : undefined
+}
+
 /**
  * Builds the minimal immutable authenticated-user context from the claims of a fully validated token.
  * Uses exactly the configured identity claim - there is no fallback claim - and fails for a missing,
@@ -33,17 +42,11 @@ export function createAuthenticatedUserContext(validatedClaims, userIdClaim) {
     return failure(UserContextFailure.USER_ID_CLAIM_NOT_CONFIGURED)
   }
 
-  if (
-    validatedClaims === null ||
-    typeof validatedClaims !== 'object' ||
-    !Object.hasOwn(validatedClaims, userIdClaim) ||
-    validatedClaims[userIdClaim] === null ||
-    validatedClaims[userIdClaim] === undefined
-  ) {
+  const value = readOwnClaim(validatedClaims, userIdClaim)
+  if (value === undefined) {
     return failure(UserContextFailure.MISSING_USER_ID_CLAIM)
   }
 
-  const value = validatedClaims[userIdClaim]
   if (typeof value !== 'string') {
     return failure(UserContextFailure.INVALID_USER_ID_CLAIM_TYPE)
   }

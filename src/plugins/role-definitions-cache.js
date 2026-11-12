@@ -26,7 +26,8 @@ export const roleDefinitionsCache = {
 
       server.decorate('server', 'roleDefinitionsCache', cache)
       server.ext('onPostStart', () => {
-        cache?.getRoleDefinitions()
+        // never rejects; the catch only satisfies the floating-promise rule
+        cache?.getRoleDefinitions().catch(() => {})
       })
       server.events.on('stop', () => cache?.clear())
     }

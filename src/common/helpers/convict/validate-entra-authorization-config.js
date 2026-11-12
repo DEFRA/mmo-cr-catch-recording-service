@@ -187,6 +187,14 @@ function checkUserRolesTemplate(errors, template, { allowHttp }) {
   }
 }
 
+function trimTrailingSlashes(path) {
+  let end = path.length
+  while (end > 0 && path[end - 1] === '/') {
+    end -= 1
+  }
+  return path.slice(0, end)
+}
+
 function checkRoleDefinitionsUrl(errors, value, serviceId, { allowHttp }) {
   const url = checkUrl(errors, 'authorization.roleDefinitionsUrl', value, {
     allowHttp
@@ -195,7 +203,7 @@ function checkRoleDefinitionsUrl(errors, value, serviceId, { allowHttp }) {
     return
   }
 
-  const path = url.pathname.replace(/\/+$/, '')
+  const path = trimTrailingSlashes(url.pathname)
   if (!path.endsWith(`${ROLE_DEFINITIONS_PATH_PREFIX}${serviceId}`)) {
     errors.push(
       `authorization.roleDefinitionsUrl must end with ${ROLE_DEFINITIONS_PATH_PREFIX}<authorization.serviceId>`

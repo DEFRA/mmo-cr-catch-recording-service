@@ -15,7 +15,15 @@ const HTTP_STATUS_TOO_MANY_REQUESTS = 429
 const HTTP_STATUS_CLIENT_ERROR_MIN = 400
 const HTTP_STATUS_SERVER_ERROR_MIN = 500
 // Approved transient statuses: the only ones that are reported as UNAVAILABLE and retried
-const TRANSIENT_STATUSES = new Set([502, 503, 504])
+const HTTP_STATUS_BAD_GATEWAY = 502
+const HTTP_STATUS_SERVICE_UNAVAILABLE = 503
+const HTTP_STATUS_GATEWAY_TIMEOUT = 504
+const TRANSIENT_STATUSES = new Set([
+  HTTP_STATUS_BAD_GATEWAY,
+  HTTP_STATUS_SERVICE_UNAVAILABLE,
+  HTTP_STATUS_GATEWAY_TIMEOUT
+])
+const WARN = 'warn'
 
 /**
  * Typed outcomes of a User Profile Service request. They describe what happened at the transport level
@@ -83,6 +91,195 @@ function sleep(ms, signal) {
   })
 }
 
+function failureForError(cause, { callerAborted, timedOut }) {
+  if (callerAborted) {
+    return failure(UserProfileOutcome.CANCELLED)
+  }
+  if (timedOut) {
+    return failure(UserProfileOutcome.TIMEOUT)
+  }
+  if (
+    cause instanceof SyntaxError ||
+    cause instanceof ResponseBodyTooLargeError
+  ) {
+    return failure(UserProfileOutcome.INVALID_JSON)
+  }
+  return failure(UserProfileOutcome.TRANSPORT_FAILURE)
+}
+
+class UserProfileClient {
+  #userRolesUrlTemplate
+  #roleDefinitionsUrl
+  #timeoutMs
+  #retryCount
+  #retryDelayMs
+  #tracingHeader
+  #fetchFn
+  #logger
+  #sleepFn
+
+  constructor(options) {
+    this.#userRolesUrlTemplate = options.userRolesUrlTemplate
+    this.#roleDefinitionsUrl = options.roleDefinitionsUrl
+    this.#timeoutMs = options.userProfileRequestTimeoutMs
+    this.#retryCount = options.userProfileRetryCount
+    this.#retryDelayMs = options.userProfileRetryDelayMs
+    this.#tracingHeader = options.tracingHeader
+    this.#fetchFn = options.fetchFn
+    this.#logger = options.logger
+    this.#sleepFn = options.sleepFn
+  }
+
+  #headersFor(correlationId) {
+    const hasCorrelation =
+      typeof correlationId === 'string' &&
+      CORRELATION_ID_FORMAT.test(correlationId)
+
+    return {
+      Accept: JSON_MEDIA_TYPE,
+      ...(hasCorrelation ? { [this.#tracingHeader]: correlationId } : {})
+    }
+  }
+
+  async #readSuccessBody(response) {
+    if (response.status !== HTTP_STATUS_OK) {
+      return statusFailure(response.status)
+    }
+    const contentType = response.headers?.get('content-type')
+    if (!contentType?.toLowerCase().startsWith(JSON_MEDIA_TYPE)) {
+      return failure(UserProfileOutcome.UNEXPECTED_CONTENT_TYPE)
+    }
+
+    const body = JSON.parse(await readBoundedText(response, MAX_RESPONSE_BYTES))
+    return Object.freeze({ ok: true, body: deepFreeze(body) })
+  }
+
+  async #attempt({ url, correlationId, signal }) {
+    const controller = new AbortController()
+    let timedOut = false
+    const timer = setTimeout(() => {
+      timedOut = true
+      controller.abort()
+    }, this.#timeoutMs)
+    const abortFromCaller = () => controller.abort()
+    signal?.addEventListener('abort', abortFromCaller, { once: true })
+
+    try {
+      const response = await this.#fetchFn(url, {
+        method: 'GET',
+        headers: this.#headersFor(correlationId),
+        redirect: 'error',
+        signal: controller.signal
+      })
+      return await this.#readSuccessBody(response)
+    } catch (cause) {
+      return failureForError(cause, {
+        callerAborted: signal?.aborted,
+        timedOut
+      })
+    } finally {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', abortFromCaller)
+    }
+  }
+
+  #shouldRetry(result, attemptNumber) {
+    return (
+      !result.ok &&
+      result.outcome === UserProfileOutcome.UNAVAILABLE &&
+      attemptNumber < this.#retryCount
+    )
+  }
+
+  async #attemptWithRetries(operation, { url, correlationId, signal }) {
+    let attemptNumber = 0
+    let result = await this.#attempt({ url, correlationId, signal })
+
+    while (this.#shouldRetry(result, attemptNumber)) {
+      safeLog(
+        this.#logger,
+        WARN,
+        {
+          event: 'user-profile.retry',
+          operation,
+          outcome: result.outcome,
+          status: result.status,
+          attempt: attemptNumber + 1
+        },
+        'user-profile.retry'
+      )
+      await this.#sleepFn(this.#retryDelayMs, signal)
+      if (signal?.aborted) {
+        return failure(UserProfileOutcome.CANCELLED)
+      }
+
+      attemptNumber += 1
+      result = await this.#attempt({ url, correlationId, signal })
+    }
+
+    return result
+  }
+
+  async #request(operation, { url, correlationId, signal }) {
+    if (signal?.aborted) {
+      return failure(UserProfileOutcome.CANCELLED)
+    }
+
+    const startedAt = Date.now()
+    const result = await this.#attemptWithRetries(operation, {
+      url,
+      correlationId,
+      signal
+    })
+
+    safeLog(
+      this.#logger,
+      result.ok ? 'debug' : WARN,
+      {
+        event: 'user-profile.request',
+        operation,
+        correlationId,
+        outcome: result.ok ? 'SUCCESS' : result.outcome,
+        status: result.ok ? HTTP_STATUS_OK : result.status,
+        durationMs: Date.now() - startedAt
+      },
+      'user-profile.request'
+    )
+
+    return result
+  }
+
+  /**
+   * @param {Readonly<{ userId: string }>} user the trusted authenticated-user context (Step 04)
+   * @param {{ correlationId?: string, signal?: AbortSignal }} [options]
+   */
+  async getUserRoles(user, { correlationId, signal } = {}) {
+    if (!isAuthenticatedUserContext(user)) {
+      return failure(UserProfileOutcome.INTERNAL_ERROR)
+    }
+
+    return this.#request(OPERATION.USER_ROLES, {
+      url: this.#userRolesUrlTemplate.replace(
+        USER_ID_PLACEHOLDER,
+        encodeURIComponent(user.userId)
+      ),
+      correlationId,
+      signal
+    })
+  }
+
+  /**
+   * @param {{ correlationId?: string, signal?: AbortSignal }} [options]
+   */
+  async getRoleDefinitions({ correlationId, signal } = {}) {
+    return this.#request(OPERATION.ROLE_DEFINITIONS, {
+      url: this.#roleDefinitionsUrl,
+      correlationId,
+      signal
+    })
+  }
+}
+
 /**
  * Framework-neutral transport client for the two approved User Profile Service reads:
  * `GET /users/{entraObjectId}/roles` and `GET /roles-definitions/services/{serviceId}`.
@@ -119,154 +316,20 @@ export function createUserProfileClient({
   logger,
   sleepFn = sleep
 }) {
-  async function attempt({ url, correlationId, signal }) {
-    const controller = new AbortController()
-    let timedOut = false
-    const timer = setTimeout(() => {
-      timedOut = true
-      controller.abort()
-    }, userProfileRequestTimeoutMs)
-    const abortFromCaller = () => controller.abort()
-    signal?.addEventListener('abort', abortFromCaller, { once: true })
+  const client = new UserProfileClient({
+    userRolesUrlTemplate,
+    roleDefinitionsUrl,
+    userProfileRequestTimeoutMs,
+    userProfileRetryCount,
+    userProfileRetryDelayMs,
+    tracingHeader,
+    fetchFn,
+    logger,
+    sleepFn
+  })
 
-    try {
-      const response = await fetchFn(url, {
-        method: 'GET',
-        headers: {
-          Accept: JSON_MEDIA_TYPE,
-          ...(typeof correlationId === 'string' &&
-          CORRELATION_ID_FORMAT.test(correlationId)
-            ? { [tracingHeader]: correlationId }
-            : {})
-        },
-        redirect: 'error',
-        signal: controller.signal
-      })
-
-      if (response.status !== HTTP_STATUS_OK) {
-        return statusFailure(response.status)
-      }
-      if (
-        !response.headers
-          ?.get('content-type')
-          ?.toLowerCase()
-          .startsWith(JSON_MEDIA_TYPE)
-      ) {
-        return failure(UserProfileOutcome.UNEXPECTED_CONTENT_TYPE)
-      }
-
-      const body = JSON.parse(
-        await readBoundedText(response, MAX_RESPONSE_BYTES)
-      )
-      return Object.freeze({ ok: true, body: deepFreeze(body) })
-    } catch (cause) {
-      if (signal?.aborted) {
-        return failure(UserProfileOutcome.CANCELLED)
-      }
-      if (timedOut) {
-        return failure(UserProfileOutcome.TIMEOUT)
-      }
-      if (
-        cause instanceof SyntaxError ||
-        cause instanceof ResponseBodyTooLargeError
-      ) {
-        return failure(UserProfileOutcome.INVALID_JSON)
-      }
-      return failure(UserProfileOutcome.TRANSPORT_FAILURE)
-    } finally {
-      clearTimeout(timer)
-      signal?.removeEventListener('abort', abortFromCaller)
-    }
+  return {
+    getUserRoles: (user, options) => client.getUserRoles(user, options),
+    getRoleDefinitions: (options) => client.getRoleDefinitions(options)
   }
-
-  async function request(operation, { url, correlationId, signal }) {
-    if (signal?.aborted) {
-      return failure(UserProfileOutcome.CANCELLED)
-    }
-
-    const startedAt = Date.now()
-    let result = null
-
-    for (
-      let attemptNumber = 0;
-      attemptNumber <= userProfileRetryCount;
-      attemptNumber++
-    ) {
-      result = await attempt({ url, correlationId, signal })
-
-      const retryable =
-        !result.ok &&
-        result.outcome === UserProfileOutcome.UNAVAILABLE &&
-        attemptNumber < userProfileRetryCount
-      if (!retryable) {
-        break
-      }
-
-      safeLog(
-        logger,
-        'warn',
-        {
-          event: 'user-profile.retry',
-          operation,
-          outcome: result.outcome,
-          status: result.status,
-          attempt: attemptNumber + 1
-        },
-        'user-profile.retry'
-      )
-      await sleepFn(userProfileRetryDelayMs, signal)
-      if (signal?.aborted) {
-        result = failure(UserProfileOutcome.CANCELLED)
-        break
-      }
-    }
-
-    const logEntry = {
-      event: 'user-profile.request',
-      operation,
-      correlationId,
-      outcome: result.ok ? 'SUCCESS' : result.outcome,
-      status: result.ok ? HTTP_STATUS_OK : result.status,
-      durationMs: Date.now() - startedAt
-    }
-    if (result.ok) {
-      safeLog(logger, 'debug', logEntry, 'user-profile.request')
-    } else {
-      safeLog(logger, 'warn', logEntry, 'user-profile.request')
-    }
-
-    return result
-  }
-
-  /**
-   * @param {Readonly<{ userId: string }>} user the trusted authenticated-user context (Step 04)
-   * @param {{ correlationId?: string, signal?: AbortSignal }} [options]
-   */
-  async function getUserRoles(user, { correlationId, signal } = {}) {
-    if (!isAuthenticatedUserContext(user)) {
-      return failure(UserProfileOutcome.INTERNAL_ERROR)
-    }
-
-    return request(OPERATION.USER_ROLES, {
-      url: userRolesUrlTemplate.replace(
-        USER_ID_PLACEHOLDER,
-        encodeURIComponent(user.userId)
-      ),
-      correlationId,
-      signal
-    })
-  }
-
-  /**
-   * @param {{ correlationId?: string, signal?: AbortSignal }} [options]
-   */
-  async function getRoleDefinitions({ correlationId, signal } = {}) {
-    return request(OPERATION.ROLE_DEFINITIONS, {
-      url: roleDefinitionsUrl,
-      correlationId,
-      signal
-    })
-  }
-
-  return { getUserRoles, getRoleDefinitions }
 }

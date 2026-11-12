@@ -20,11 +20,11 @@ export async function readBoundedText(response, maxBytes) {
   }
 
   if (!response.body?.getReader) {
-    const text = await response.text()
-    if (Buffer.byteLength(text) > maxBytes) {
+    const fullText = await response.text()
+    if (Buffer.byteLength(fullText) > maxBytes) {
       throw new ResponseBodyTooLargeError()
     }
-    return text
+    return fullText
   }
 
   const reader = response.body.getReader()

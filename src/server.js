@@ -22,8 +22,8 @@ import { pulse } from '#/plugins/pulse.js'
 import { requestTracing } from '#/plugins/request-tracing.js'
 import { metrics } from '@defra/cdp-metrics'
 
-export async function createServer() {
-  const server = Hapi.server({
+function serverOptions() {
+  return {
     host: config.get('host'),
     port: config.get('port'),
     routes: {
@@ -47,7 +47,51 @@ export async function createServer() {
     router: {
       stripTrailingSlash: true
     }
-  })
+  }
+}
+
+/** Entra authentication, User Profile Service, caches and capability enforcement, in dependency order. */
+function authorizationPlugins() {
+  return [
+    {
+      plugin: entraSigningKeys,
+      options: { entra: config.get('entra'), allowHttp: isLocalRuntime }
+    },
+    {
+      plugin: entraAuthentication,
+      options: { entra: config.get('entra') }
+    },
+    {
+      plugin: userProfile,
+      options: {
+        ...config.get('authorization'),
+        tracingHeader: config.get('tracing.header')
+      }
+    },
+    {
+      plugin: userRoleCache,
+      options: {
+        ttlSeconds: config.get('authorization.userRoleCacheTtlSeconds'),
+        maximumEntries: config.get('authorization.userRoleCacheMaximumEntries')
+      }
+    },
+    {
+      plugin: roleDefinitionsCache,
+      options: {
+        serviceId: config.get('authorization.serviceId'),
+        ttlSeconds: config.get('authorization.roleDefinitionsCacheTtlSeconds'),
+        maximumStaleSeconds: config.get(
+          'authorization.roleDefinitionsCacheMaximumStaleSeconds'
+        )
+      }
+    },
+    capabilityAuthorizer,
+    capabilityEnforcement
+  ]
+}
+
+export async function createServer() {
+  const server = Hapi.server(serverOptions())
 
   // Hapi Plugins:
   // requestLogger       - automatically logs incoming requests
@@ -90,40 +134,7 @@ export async function createServer() {
     },
     securityTelemetry,
     errorMapping,
-    {
-      plugin: entraSigningKeys,
-      options: { entra: config.get('entra'), allowHttp: isLocalRuntime }
-    },
-    {
-      plugin: entraAuthentication,
-      options: { entra: config.get('entra') }
-    },
-    {
-      plugin: userProfile,
-      options: {
-        ...config.get('authorization'),
-        tracingHeader: config.get('tracing.header')
-      }
-    },
-    {
-      plugin: userRoleCache,
-      options: {
-        ttlSeconds: config.get('authorization.userRoleCacheTtlSeconds'),
-        maximumEntries: config.get('authorization.userRoleCacheMaximumEntries')
-      }
-    },
-    {
-      plugin: roleDefinitionsCache,
-      options: {
-        serviceId: config.get('authorization.serviceId'),
-        ttlSeconds: config.get('authorization.roleDefinitionsCacheTtlSeconds'),
-        maximumStaleSeconds: config.get(
-          'authorization.roleDefinitionsCacheMaximumStaleSeconds'
-        )
-      }
-    },
-    capabilityAuthorizer,
-    capabilityEnforcement,
+    ...authorizationPlugins(),
     {
       plugin: referenceDataPlugin,
       options: {

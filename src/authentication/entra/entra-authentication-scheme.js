@@ -4,6 +4,8 @@ import { tokenFailureCategory } from '#/authorization/security-telemetry.js'
 import { entraAuthenticationError } from './authentication-error.js'
 import { createAuthenticatedUserContext } from './authenticated-user-context.js'
 
+const TOKEN_VALIDATION_EVENT = 'auth.token-validation'
+
 /**
  * Hapi custom authentication scheme backed by the Entra access-token validator. The only trusted input
  * is the standard `Authorization` header. The request pipeline is: validate the token completely, then
@@ -31,19 +33,19 @@ export function entraAuthenticationScheme(_server, options) {
   const report = (startedAt, outcome, reason, source) => {
     try {
       const fields = {
-        event: 'auth.token-validation',
+        event: TOKEN_VALIDATION_EVENT,
         outcome,
         reason,
         correlationId: getTraceId(),
         durationMs: now() - startedAt
       }
       if (outcome === 'success') {
-        telemetry?.debug(fields, 'auth.token-validation')
+        telemetry?.debug(fields, TOKEN_VALIDATION_EVENT)
       } else if (source === 'dependency' || source === 'internal') {
-        telemetry?.warn(fields, 'auth.token-validation')
+        telemetry?.warn(fields, TOKEN_VALIDATION_EVENT)
       } else {
         // Expected credential failures are not errors and are logged below warning to limit flooding
-        telemetry?.info(fields, 'auth.token-validation')
+        telemetry?.info(fields, TOKEN_VALIDATION_EVENT)
       }
     } catch {
       // telemetry is never allowed to alter the authentication outcome

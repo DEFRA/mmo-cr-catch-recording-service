@@ -2,6 +2,9 @@ import { safeLog } from '#/common/helpers/logging/safe-log.js'
 import { isSigningKeyError, SigningKeyFailure } from './signing-key-failure.js'
 
 const MILLISECONDS_PER_SECOND = 1000
+const REFRESH_EVENT = 'oidc.refresh'
+const LOOKUP_EVENT = 'oidc.lookup'
+const WARN = 'warn'
 
 function buildSnapshot({ metadata, signingKeys, loadedAt, refreshDueAt }) {
   const keys = new Map(signingKeys)
@@ -21,6 +24,222 @@ function whenAborted(signal) {
   return new Promise((resolve) => {
     signal.addEventListener('abort', resolve, { once: true })
   })
+}
+
+function lookupFailure(reason, refreshAttempted) {
+  return { ok: false, reason, refreshAttempted }
+}
+
+function failureFor(outcome, lastFailureReason) {
+  switch (outcome.status) {
+    case 'failed':
+      return { reason: outcome.reason }
+    case 'throttled':
+      return {
+        reason: SigningKeyFailure.REFRESH_THROTTLED,
+        lastRefreshFailure: lastFailureReason
+      }
+    default:
+      return { reason: SigningKeyFailure.KEY_NOT_FOUND }
+  }
+}
+
+function toRefreshOutcome(result) {
+  return result.ok
+    ? { status: 'refreshed' }
+    : { status: 'failed', reason: result.reason }
+}
+
+class SigningKeyProvider {
+  #metadataClient
+  #jwksClient
+  #refreshIntervalMs
+  #minimumRefreshIntervalMs
+  #now
+  #logger
+  #snapshot = null
+  #inFlightRefresh = null
+  #lastAttemptAt = null
+  #lastFailureReason = null
+
+  constructor({
+    metadataClient,
+    jwksClient,
+    refreshIntervalSeconds,
+    minimumRefreshIntervalSeconds,
+    now,
+    logger
+  }) {
+    this.#metadataClient = metadataClient
+    this.#jwksClient = jwksClient
+    this.#refreshIntervalMs = refreshIntervalSeconds * MILLISECONDS_PER_SECOND
+    this.#minimumRefreshIntervalMs =
+      minimumRefreshIntervalSeconds * MILLISECONDS_PER_SECOND
+    this.#now = now
+    this.#logger = logger
+  }
+
+  async #runRefresh() {
+    const startedAt = this.#now()
+    try {
+      const metadata = await this.#metadataClient.fetchMetadata()
+      const signingKeys = await this.#jwksClient.fetchSigningKeys(
+        metadata.jwksUri
+      )
+      const loadedAt = this.#now()
+
+      this.#snapshot = buildSnapshot({
+        metadata,
+        signingKeys,
+        loadedAt,
+        refreshDueAt: loadedAt + this.#refreshIntervalMs
+      })
+      this.#lastFailureReason = null
+      safeLog(
+        this.#logger,
+        'info',
+        {
+          event: REFRESH_EVENT,
+          outcome: 'success',
+          keyCount: this.#snapshot.keyIds.length,
+          durationMs: loadedAt - startedAt
+        },
+        REFRESH_EVENT
+      )
+
+      return { ok: true }
+    } catch (cause) {
+      return this.#recordRefreshFailure(cause, startedAt)
+    }
+  }
+
+  #recordRefreshFailure(cause, startedAt) {
+    const reason = isSigningKeyError(cause)
+      ? cause.reason
+      : SigningKeyFailure.INTERNAL_ERROR
+    this.#lastFailureReason = reason
+    safeLog(
+      this.#logger,
+      WARN,
+      {
+        event: REFRESH_EVENT,
+        outcome: 'failure',
+        reason,
+        durationMs: this.#now() - startedAt
+      },
+      REFRESH_EVENT
+    )
+
+    return { ok: false, reason }
+  }
+
+  #startRefresh() {
+    this.#lastAttemptAt = this.#now()
+    const refresh = this.#runRefresh()
+    this.#inFlightRefresh = refresh
+    // runRefresh never rejects, so the lock is always released, including after parser failures
+    refresh
+      .finally(() => {
+        if (this.#inFlightRefresh === refresh) {
+          this.#inFlightRefresh = null
+        }
+      })
+      .catch(() => {})
+    return refresh
+  }
+
+  #isRefreshAttemptAllowed() {
+    return (
+      this.#lastAttemptAt === null ||
+      this.#now() - this.#lastAttemptAt >= this.#minimumRefreshIntervalMs
+    )
+  }
+
+  async #refreshIfAllowed(signal) {
+    let refresh = this.#inFlightRefresh
+    if (!refresh) {
+      if (!this.#isRefreshAttemptAllowed()) {
+        return { status: 'throttled' }
+      }
+      refresh = this.#startRefresh()
+    }
+
+    // A cancelled caller stops waiting; the shared refresh continues for any other caller.
+    const settled = refresh.then(toRefreshOutcome)
+    return signal
+      ? Promise.race([
+          settled,
+          whenAborted(signal).then(() => ({ status: 'cancelled' }))
+        ])
+      : settled
+  }
+
+  #logLookup(outcome, reason) {
+    safeLog(
+      this.#logger,
+      WARN,
+      { event: LOOKUP_EVENT, outcome, reason },
+      LOOKUP_EVENT
+    )
+  }
+
+  #findFreshKey(keyId) {
+    const isFresh =
+      this.#snapshot !== null && this.#now() < this.#snapshot.refreshDueAt
+    const key = this.#snapshot?.getKey(keyId) ?? null
+    return isFresh ? key : null
+  }
+
+  /**
+   * @param {string} keyId the JWT header `kid`
+   * @param {{ signal?: AbortSignal }} [options]
+   * @returns {Promise<{ ok: true, keyId: string, key: unknown } | { ok: false, reason: string,
+   *   refreshAttempted: boolean, lastRefreshFailure?: string | null }>}
+   */
+  async getSigningKey(keyId, { signal } = {}) {
+    if (typeof keyId !== 'string' || keyId.length === 0) {
+      return lookupFailure(SigningKeyFailure.KEY_NOT_FOUND, false)
+    }
+    if (signal?.aborted) {
+      return lookupFailure(SigningKeyFailure.REQUEST_CANCELLED, false)
+    }
+
+    const cachedKey = this.#findFreshKey(keyId)
+    if (cachedKey) {
+      return { ok: true, keyId, key: cachedKey }
+    }
+
+    // Absent, due for refresh, or unknown kid: at most one refresh for this resolution, one retry.
+    const outcome = await this.#refreshIfAllowed(signal)
+    if (outcome.status === 'cancelled') {
+      return lookupFailure(SigningKeyFailure.REQUEST_CANCELLED, true)
+    }
+
+    return this.#resolveAfterRefresh(keyId, outcome)
+  }
+
+  #resolveAfterRefresh(keyId, outcome) {
+    if (outcome.status === 'throttled') {
+      this.#logLookup('throttled', 'refresh-throttled')
+    }
+
+    const key = this.#snapshot?.getKey(keyId) ?? null
+    if (key) {
+      return { ok: true, keyId, key }
+    }
+
+    if (outcome.status === 'refreshed') {
+      // Counted without the raw key identifier
+      this.#logLookup('unknown-kid', 'key-not-found')
+    }
+
+    return {
+      ok: false,
+      refreshAttempted:
+        outcome.status === 'refreshed' || outcome.status === 'failed',
+      ...failureFor(outcome, this.#lastFailureReason)
+    }
+  }
 }
 
 /**
@@ -52,194 +271,16 @@ export function createSigningKeyProvider({
   now = Date.now,
   logger
 }) {
-  let snapshot = null
-  let inFlightRefresh = null
-  let lastAttemptAt = null
-  let lastFailureReason = null
+  const provider = new SigningKeyProvider({
+    metadataClient,
+    jwksClient,
+    refreshIntervalSeconds,
+    minimumRefreshIntervalSeconds,
+    now,
+    logger
+  })
 
-  async function runRefresh() {
-    const startedAt = now()
-    try {
-      const metadata = await metadataClient.fetchMetadata()
-      const signingKeys = await jwksClient.fetchSigningKeys(metadata.jwksUri)
-      const loadedAt = now()
-
-      snapshot = buildSnapshot({
-        metadata,
-        signingKeys,
-        loadedAt,
-        refreshDueAt:
-          loadedAt + refreshIntervalSeconds * MILLISECONDS_PER_SECOND
-      })
-      lastFailureReason = null
-      safeLog(
-        logger,
-        'info',
-        {
-          event: 'oidc.refresh',
-          outcome: 'success',
-          keyCount: snapshot.keyIds.length,
-          durationMs: loadedAt - startedAt
-        },
-        'oidc.refresh'
-      )
-
-      return { ok: true }
-    } catch (cause) {
-      const reason = isSigningKeyError(cause)
-        ? cause.reason
-        : SigningKeyFailure.INTERNAL_ERROR
-      lastFailureReason = reason
-      safeLog(
-        logger,
-        'warn',
-        {
-          event: 'oidc.refresh',
-          outcome: 'failure',
-          reason,
-          durationMs: now() - startedAt
-        },
-        'oidc.refresh'
-      )
-
-      return { ok: false, reason }
-    }
+  return {
+    getSigningKey: (keyId, options) => provider.getSigningKey(keyId, options)
   }
-
-  function startRefresh() {
-    lastAttemptAt = now()
-    const refresh = runRefresh()
-    inFlightRefresh = refresh
-    // runRefresh never rejects, so the lock is always released, including after parser failures
-    refresh.finally(() => {
-      if (inFlightRefresh === refresh) {
-        inFlightRefresh = null
-      }
-    })
-    return refresh
-  }
-
-  function isRefreshAttemptAllowed() {
-    return (
-      lastAttemptAt === null ||
-      now() - lastAttemptAt >=
-        minimumRefreshIntervalSeconds * MILLISECONDS_PER_SECOND
-    )
-  }
-
-  async function refreshIfAllowed(signal) {
-    let refresh = inFlightRefresh
-    if (!refresh) {
-      if (!isRefreshAttemptAllowed()) {
-        return { status: 'throttled' }
-      }
-      refresh = startRefresh()
-    }
-
-    // A cancelled caller stops waiting; the shared refresh continues for any other caller.
-    const settled = refresh.then((result) =>
-      result.ok
-        ? { status: 'refreshed' }
-        : { status: 'failed', reason: result.reason }
-    )
-    return signal
-      ? Promise.race([
-          settled,
-          whenAborted(signal).then(() => ({ status: 'cancelled' }))
-        ])
-      : settled
-  }
-
-  function failureFor(outcome) {
-    switch (outcome.status) {
-      case 'failed':
-        return { reason: outcome.reason }
-      case 'throttled':
-        return {
-          reason: SigningKeyFailure.REFRESH_THROTTLED,
-          lastRefreshFailure: lastFailureReason
-        }
-      default:
-        return { reason: SigningKeyFailure.KEY_NOT_FOUND }
-    }
-  }
-
-  /**
-   * @param {string} keyId the JWT header `kid`
-   * @param {{ signal?: AbortSignal }} [options]
-   * @returns {Promise<{ ok: true, keyId: string, key: unknown } | { ok: false, reason: string,
-   *   refreshAttempted: boolean, lastRefreshFailure?: string | null }>}
-   */
-  async function getSigningKey(keyId, { signal } = {}) {
-    if (typeof keyId !== 'string' || keyId.length === 0) {
-      return {
-        ok: false,
-        reason: SigningKeyFailure.KEY_NOT_FOUND,
-        refreshAttempted: false
-      }
-    }
-    if (signal?.aborted) {
-      return {
-        ok: false,
-        reason: SigningKeyFailure.REQUEST_CANCELLED,
-        refreshAttempted: false
-      }
-    }
-
-    const isFresh = snapshot !== null && now() < snapshot.refreshDueAt
-    const cachedKey = snapshot?.getKey(keyId) ?? null
-    if (cachedKey && isFresh) {
-      return { ok: true, keyId, key: cachedKey }
-    }
-
-    // Absent, due for refresh, or unknown kid: at most one refresh for this resolution, one retry.
-    const outcome = await refreshIfAllowed(signal)
-    if (outcome.status === 'throttled') {
-      safeLog(
-        logger,
-        'warn',
-        {
-          event: 'oidc.lookup',
-          outcome: 'throttled',
-          reason: 'refresh-throttled'
-        },
-        'oidc.lookup'
-      )
-    }
-    if (outcome.status === 'cancelled') {
-      return {
-        ok: false,
-        reason: SigningKeyFailure.REQUEST_CANCELLED,
-        refreshAttempted: true
-      }
-    }
-
-    const key = snapshot?.getKey(keyId) ?? null
-    if (key) {
-      return { ok: true, keyId, key }
-    }
-
-    if (outcome.status === 'refreshed') {
-      // Counted without the raw key identifier
-      safeLog(
-        logger,
-        'warn',
-        {
-          event: 'oidc.lookup',
-          outcome: 'unknown-kid',
-          reason: 'key-not-found'
-        },
-        'oidc.lookup'
-      )
-    }
-
-    return {
-      ok: false,
-      refreshAttempted:
-        outcome.status === 'refreshed' || outcome.status === 'failed',
-      ...failureFor(outcome)
-    }
-  }
-
-  return { getSigningKey }
 }

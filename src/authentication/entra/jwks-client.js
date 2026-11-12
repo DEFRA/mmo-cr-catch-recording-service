@@ -22,18 +22,47 @@ function hasPlausibleExponent(encodedExponent) {
   )
 }
 
-function isCompatibleSigningKey(jwk, allowedAlgorithms) {
+function hasSigningUse(jwk, allowedAlgorithms) {
+  return (
+    (jwk.use === undefined || jwk.use === 'sig') &&
+    (jwk.alg === undefined || allowedAlgorithms.includes(jwk.alg)) &&
+    (jwk.key_ops === undefined ||
+      (Array.isArray(jwk.key_ops) && jwk.key_ops.includes('verify')))
+  )
+}
+
+function hasPublicRsaMembers(jwk) {
   return (
     jwk.kty === 'RSA' &&
     typeof jwk.n === 'string' &&
     typeof jwk.e === 'string' &&
-    (jwk.use === undefined || jwk.use === 'sig') &&
-    (jwk.alg === undefined || allowedAlgorithms.includes(jwk.alg)) &&
-    (jwk.key_ops === undefined ||
-      (Array.isArray(jwk.key_ops) && jwk.key_ops.includes('verify'))) &&
-    PRIVATE_KEY_MEMBERS.every((member) => jwk[member] === undefined) &&
+    PRIVATE_KEY_MEMBERS.every((member) => jwk[member] === undefined)
+  )
+}
+
+function isCompatibleSigningKey(jwk, allowedAlgorithms) {
+  return (
+    hasPublicRsaMembers(jwk) &&
+    hasSigningUse(jwk, allowedAlgorithms) &&
     hasPlausibleExponent(jwk.e) &&
     Buffer.from(jwk.n, 'base64url').length >= MINIMUM_RSA_MODULUS_BYTES
+  )
+}
+
+function isCandidateKey(jwk, allowedAlgorithms) {
+  return (
+    isPlainObject(jwk) &&
+    typeof jwk.kid === 'string' &&
+    jwk.kid.length > 0 &&
+    isCompatibleSigningKey(jwk, allowedAlgorithms)
+  )
+}
+
+function isUsableKeySet(document) {
+  return (
+    isPlainObject(document) &&
+    Array.isArray(document.keys) &&
+    document.keys.length <= MAX_JWKS_KEYS
   )
 }
 
@@ -82,29 +111,24 @@ export function createJwksClient({
       invalidReason: SigningKeyFailure.JWKS_INVALID
     })
 
-    if (
-      !isPlainObject(document) ||
-      !Array.isArray(document.keys) ||
-      document.keys.length > MAX_JWKS_KEYS
-    ) {
+    if (!isUsableKeySet(document)) {
       throw new SigningKeyError(SigningKeyFailure.JWKS_INVALID)
     }
     assertUniqueKeyIds(document.keys)
 
+    const candidates = document.keys.filter((jwk) =>
+      isCandidateKey(jwk, allowedAlgorithms)
+    )
+    const imported = await Promise.all(
+      candidates.map((jwk) => importPublicKey(jwk, allowedAlgorithms[0]))
+    )
+
     const signingKeys = new Map()
-    for (const jwk of document.keys) {
-      if (
-        isPlainObject(jwk) &&
-        typeof jwk.kid === 'string' &&
-        jwk.kid.length > 0 &&
-        isCompatibleSigningKey(jwk, allowedAlgorithms)
-      ) {
-        const key = await importPublicKey(jwk, allowedAlgorithms[0])
-        if (key) {
-          signingKeys.set(jwk.kid, key)
-        }
+    candidates.forEach((jwk, index) => {
+      if (imported[index]) {
+        signingKeys.set(jwk.kid, imported[index])
       }
-    }
+    })
 
     if (signingKeys.size === 0) {
       throw new SigningKeyError(SigningKeyFailure.NO_USABLE_SIGNING_KEYS)

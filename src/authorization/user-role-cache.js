@@ -32,6 +32,171 @@ function whenAborted(signal) {
   })
 }
 
+class UserRoleCache {
+  #userProfileClient
+  #ttlMs
+  #maximumEntries
+  #now
+  #logger
+  // Map iteration order is insertion order, so the first key is always the least recently used
+  #entries = new Map()
+  #refreshes = new Map()
+
+  constructor({ userProfileClient, ttlSeconds, maximumEntries, now, logger }) {
+    this.#userProfileClient = userProfileClient
+    this.#ttlMs = ttlSeconds * MILLISECONDS_PER_SECOND
+    this.#maximumEntries = maximumEntries
+    this.#now = now
+    this.#logger = logger
+  }
+
+  #emit(event, fields) {
+    safeLog(this.#logger, 'debug', { event, ...fields }, event)
+  }
+
+  #warn(event, fields) {
+    safeLog(this.#logger, 'warn', { event, ...fields }, event)
+  }
+
+  #evictIfNeeded() {
+    if (this.#entries.size <= this.#maximumEntries) {
+      return
+    }
+
+    this.#emit('user-role-cache.capacity-reached')
+    for (const [userId, entry] of this.#entries) {
+      if (this.#now() >= entry.expiresAt) {
+        this.#entries.delete(userId)
+        this.#emit('user-role-cache.entry-evicted', { reason: 'expired' })
+      }
+    }
+    while (this.#entries.size > this.#maximumEntries) {
+      this.#entries.delete(this.#entries.keys().next().value)
+      this.#emit('user-role-cache.entry-evicted', {
+        reason: 'least-recently-used'
+      })
+    }
+  }
+
+  #publish(userId, value) {
+    const loadedAt = this.#now()
+    const existing = this.#entries.get(userId)
+    if (existing && existing.loadedAt > loadedAt) {
+      return
+    }
+
+    // Re-inserting moves the user to the most recently used position
+    this.#entries.delete(userId)
+    this.#entries.set(
+      userId,
+      Object.freeze({ value, loadedAt, expiresAt: loadedAt + this.#ttlMs })
+    )
+    this.#emit(
+      existing
+        ? 'user-role-cache.entry-replaced'
+        : 'user-role-cache.entry-inserted',
+      { roleState: value.roleIds.length === 0 ? 'no-roles' : 'roles' }
+    )
+    this.#evictIfNeeded()
+  }
+
+  async #refresh(user, correlationId) {
+    this.#emit('user-role-cache.refresh-started', { correlationId })
+    const startedAt = this.#now()
+    try {
+      const transport = await this.#userProfileClient.getUserRoles(user, {
+        correlationId
+      })
+      const result = validateUserRolesResult(transport, user)
+
+      if (result.ok) {
+        this.#publish(user.userId, result.value)
+        this.#emit('user-role-cache.refresh-succeeded', {
+          correlationId,
+          durationMs: this.#now() - startedAt
+        })
+        return Object.freeze({
+          ok: true,
+          value: result.value,
+          cacheState: UserRoleCacheState.REFRESHED
+        })
+      }
+
+      this.#warn('user-role-cache.refresh-failed', {
+        source: result.source,
+        outcome: result.outcome,
+        reason: result.reason,
+        correlationId,
+        durationMs: this.#now() - startedAt
+      })
+      return result
+    } catch {
+      this.#warn('user-role-cache.unexpected-error', { correlationId })
+      return cacheFailure(UserRoleCacheFailure.UNEXPECTED_CACHE_FAILURE)
+    }
+  }
+
+  #joinOrStartRefresh(user, correlationId) {
+    const existing = this.#refreshes.get(user.userId)
+    if (existing) {
+      this.#emit('user-role-cache.refresh-coalesced')
+      return existing
+    }
+
+    const started = this.#refresh(user, correlationId)
+    this.#refreshes.set(user.userId, started)
+    // refresh never rejects, so the coordination state is always released
+    started
+      .finally(() => {
+        if (this.#refreshes.get(user.userId) === started) {
+          this.#refreshes.delete(user.userId)
+        }
+      })
+      .catch(() => {})
+    return started
+  }
+
+  /**
+   * @param {Readonly<{ userId: string }>} user the trusted Step 04 authenticated-user context
+   * @param {{ correlationId?: string, signal?: AbortSignal }} [options]
+   * @returns {Promise<{ ok: true, value: object, cacheState: 'hit' | 'refreshed' }
+   *   | { ok: false, source: 'dependency' | 'validation' | 'cache' }>}
+   */
+  async getUserRoles(user, { correlationId, signal } = {}) {
+    if (!isAuthenticatedUserContext(user)) {
+      return cacheFailure(UserRoleCacheFailure.UNTRUSTED_USER_CONTEXT)
+    }
+    if (signal?.aborted) {
+      return cancelledFailure()
+    }
+
+    const entry = this.#entries.get(user.userId)
+    if (entry && this.#now() < entry.expiresAt) {
+      this.#entries.delete(user.userId)
+      this.#entries.set(user.userId, entry)
+      this.#emit('user-role-cache.hit')
+      return Object.freeze({
+        ok: true,
+        value: entry.value,
+        cacheState: UserRoleCacheState.HIT
+      })
+    }
+
+    this.#emit(entry ? 'user-role-cache.expired' : 'user-role-cache.miss')
+    const pending = this.#joinOrStartRefresh(user, correlationId)
+
+    return signal
+      ? Promise.race([pending, whenAborted(signal).then(cancelledFailure)])
+      : pending
+  }
+
+  /** Releases all cached data; used at shutdown and in tests. */
+  clear() {
+    this.#entries.clear()
+    this.#refreshes.clear()
+  }
+}
+
 /**
  * Process-local, bounded cache of validated user-role assignments, keyed only by the trusted stable user
  * identifier.
@@ -63,163 +228,16 @@ export function createUserRoleCache({
   now = () => performance.now(),
   logger
 }) {
-  // Map iteration order is insertion order, so the first key is always the least recently used
-  const entries = new Map()
-  const refreshes = new Map()
+  const cache = new UserRoleCache({
+    userProfileClient,
+    ttlSeconds,
+    maximumEntries,
+    now,
+    logger
+  })
 
-  const emit = (event, fields) =>
-    safeLog(logger, 'debug', { event, ...fields }, event)
-
-  function evictIfNeeded() {
-    if (entries.size <= maximumEntries) {
-      return
-    }
-
-    emit('user-role-cache.capacity-reached')
-    for (const [userId, entry] of entries) {
-      if (now() >= entry.expiresAt) {
-        entries.delete(userId)
-        emit('user-role-cache.entry-evicted', { reason: 'expired' })
-      }
-    }
-    while (entries.size > maximumEntries) {
-      entries.delete(entries.keys().next().value)
-      emit('user-role-cache.entry-evicted', { reason: 'least-recently-used' })
-    }
+  return {
+    getUserRoles: (user, options) => cache.getUserRoles(user, options),
+    clear: () => cache.clear()
   }
-
-  function publish(userId, value) {
-    const loadedAt = now()
-    const existing = entries.get(userId)
-    if (existing && existing.loadedAt > loadedAt) {
-      return
-    }
-
-    // Re-inserting moves the user to the most recently used position
-    entries.delete(userId)
-    entries.set(
-      userId,
-      Object.freeze({
-        value,
-        loadedAt,
-        expiresAt: loadedAt + ttlSeconds * MILLISECONDS_PER_SECOND
-      })
-    )
-    emit(
-      existing
-        ? 'user-role-cache.entry-replaced'
-        : 'user-role-cache.entry-inserted',
-      {
-        roleState: value.roleIds.length === 0 ? 'no-roles' : 'roles'
-      }
-    )
-    evictIfNeeded()
-  }
-
-  async function refresh(user, correlationId) {
-    emit('user-role-cache.refresh-started', { correlationId })
-    const startedAt = now()
-    try {
-      const transport = await userProfileClient.getUserRoles(user, {
-        correlationId
-      })
-      const result = validateUserRolesResult(transport, user)
-
-      if (result.ok) {
-        publish(user.userId, result.value)
-        emit('user-role-cache.refresh-succeeded', {
-          correlationId,
-          durationMs: now() - startedAt
-        })
-        return Object.freeze({
-          ok: true,
-          value: result.value,
-          cacheState: UserRoleCacheState.REFRESHED
-        })
-      }
-
-      safeLog(
-        logger,
-        'warn',
-        {
-          event: 'user-role-cache.refresh-failed',
-          source: result.source,
-          outcome: result.outcome,
-          reason: result.reason,
-          correlationId,
-          durationMs: now() - startedAt
-        },
-        'user-role-cache.refresh-failed'
-      )
-      return result
-    } catch {
-      safeLog(
-        logger,
-        'warn',
-        { event: 'user-role-cache.unexpected-error', correlationId },
-        'user-role-cache.unexpected-error'
-      )
-      return cacheFailure(UserRoleCacheFailure.UNEXPECTED_CACHE_FAILURE)
-    }
-  }
-
-  function joinOrStartRefresh(user, correlationId) {
-    const existing = refreshes.get(user.userId)
-    if (existing) {
-      emit('user-role-cache.refresh-coalesced')
-      return existing
-    }
-
-    const started = refresh(user, correlationId)
-    refreshes.set(user.userId, started)
-    // refresh never rejects, so the coordination state is always released
-    started.finally(() => {
-      if (refreshes.get(user.userId) === started) {
-        refreshes.delete(user.userId)
-      }
-    })
-    return started
-  }
-
-  /**
-   * @param {Readonly<{ userId: string }>} user the trusted Step 04 authenticated-user context
-   * @param {{ correlationId?: string, signal?: AbortSignal }} [options]
-   * @returns {Promise<{ ok: true, value: object, cacheState: 'hit' | 'refreshed' }
-   *   | { ok: false, source: 'dependency' | 'validation' | 'cache' }>}
-   */
-  async function getUserRoles(user, { correlationId, signal } = {}) {
-    if (!isAuthenticatedUserContext(user)) {
-      return cacheFailure(UserRoleCacheFailure.UNTRUSTED_USER_CONTEXT)
-    }
-    if (signal?.aborted) {
-      return cancelledFailure()
-    }
-
-    const entry = entries.get(user.userId)
-    if (entry && now() < entry.expiresAt) {
-      entries.delete(user.userId)
-      entries.set(user.userId, entry)
-      emit('user-role-cache.hit')
-      return Object.freeze({
-        ok: true,
-        value: entry.value,
-        cacheState: UserRoleCacheState.HIT
-      })
-    }
-
-    emit(entry ? 'user-role-cache.expired' : 'user-role-cache.miss')
-    const pending = joinOrStartRefresh(user, correlationId)
-
-    return signal
-      ? Promise.race([pending, whenAborted(signal).then(cancelledFailure)])
-      : pending
-  }
-
-  /** Releases all cached data; used at shutdown and in tests. */
-  function clear() {
-    entries.clear()
-    refreshes.clear()
-  }
-
-  return { getUserRoles, clear }
 }

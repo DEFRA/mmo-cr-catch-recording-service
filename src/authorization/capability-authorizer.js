@@ -132,6 +132,150 @@ function unavailableForDefinitions(failure) {
   )
 }
 
+const DECISION_EVENT = 'authorization.decision'
+
+function collectGrants(roleIds, capabilitiesByRole, capabilityId) {
+  // Assigned roles are `[vessel]--[role]`: the role's capabilities apply to that vessel only
+  let unknownRoleCount = 0
+  const grantingVesselIds = new Set()
+  for (const assignedRoleId of roleIds) {
+    const scoped = parseVesselScopedRole(assignedRoleId)
+    const capabilities = scoped && capabilitiesByRole.get(scoped.roleId)
+    if (!capabilities) {
+      unknownRoleCount += 1
+    } else if (capabilities.has(capabilityId)) {
+      grantingVesselIds.add(scoped.vesselId)
+    }
+  }
+
+  return { unknownRoleCount, grantingVesselIds }
+}
+
+function evaluate(roleIds, snapshot, { capabilityId, vesselId }, context) {
+  const { capabilitiesByRole, knownCapabilities } = indexOf(snapshot)
+  const base = {
+    capability: capabilityId,
+    definitionsVersion: snapshot.definitionsVersion,
+    ...context
+  }
+
+  if (!knownCapabilities.has(capabilityId)) {
+    return Object.freeze({
+      outcome: AuthorizationOutcome.DENIED,
+      reason: DenialReason.REQUIRED_CAPABILITY_UNKNOWN,
+      ...base
+    })
+  }
+
+  const { unknownRoleCount, grantingVesselIds } = collectGrants(
+    roleIds,
+    capabilitiesByRole,
+    capabilityId
+  )
+  const granted =
+    vesselId === undefined
+      ? grantingVesselIds.size > 0
+      : grantingVesselIds.has(vesselId)
+  if (granted) {
+    return Object.freeze({
+      outcome: AuthorizationOutcome.ALLOWED,
+      ...base,
+      grantedVesselIds: Object.freeze(
+        vesselId === undefined ? [...grantingVesselIds] : [vesselId]
+      ),
+      unknownRoleCount
+    })
+  }
+
+  return Object.freeze({
+    outcome: AuthorizationOutcome.DENIED,
+    reason:
+      unknownRoleCount === roleIds.length
+        ? DenialReason.ALL_ASSIGNED_ROLES_UNKNOWN
+        : DenialReason.CAPABILITY_NOT_GRANTED,
+    ...base,
+    unknownRoleCount
+  })
+}
+
+function hasValidRequest(user, capability, vesselId) {
+  return (
+    issuedCapabilities.has(capability) &&
+    (vesselId === undefined || isValidIdentifier(vesselId))
+  )
+}
+
+async function decide(
+  { userRoleCache, roleDefinitionsCache },
+  user,
+  capability,
+  { vesselId, correlationId, signal }
+) {
+  if (!isAuthenticatedUserContext(user)) {
+    return unavailable(UnavailableReason.UNTRUSTED_USER_CONTEXT)
+  }
+  if (!hasValidRequest(user, capability, vesselId)) {
+    return unavailable(UnavailableReason.INVALID_REQUIRED_CAPABILITY)
+  }
+
+  const userRoles = await userRoleCache.getUserRoles(user, {
+    correlationId,
+    signal
+  })
+  if (!userRoles.ok) {
+    return unavailableForUserRoles(userRoles)
+  }
+
+  const { capabilityId } = capability
+  const userRoleCacheState = userRoles.cacheState
+  if (userRoles.value.roleIds.length === 0) {
+    return Object.freeze({
+      outcome: AuthorizationOutcome.DENIED,
+      reason: DenialReason.NO_ASSIGNED_ROLES,
+      capability: capabilityId,
+      userRoleCacheState
+    })
+  }
+
+  const definitions = await roleDefinitionsCache.getRoleDefinitions({
+    correlationId,
+    signal
+  })
+  if (!definitions.ok) {
+    return unavailableForDefinitions(definitions)
+  }
+
+  return evaluate(
+    userRoles.value.roleIds,
+    definitions.snapshot,
+    { capabilityId, vesselId },
+    {
+      userRoleCacheState,
+      roleDefinitionsCacheState: definitions.cacheState,
+      staleDefinitionsUsed: definitions.freshness === SnapshotState.STALE
+    }
+  )
+}
+
+function logDecision(logger, decision, correlationId, durationMs) {
+  const entry = {
+    event: DECISION_EVENT,
+    outcome: decision.outcome,
+    reason: decision.reason ?? 'granted',
+    capability: decision.capability,
+    definitionsVersion: decision.definitionsVersion,
+    userRoleCacheState: decision.userRoleCacheState,
+    roleDefinitionsCacheState: decision.roleDefinitionsCacheState,
+    staleDefinitionsUsed: decision.staleDefinitionsUsed,
+    unknownRoleCount: decision.unknownRoleCount,
+    correlationId,
+    durationMs
+  }
+  const level =
+    decision.outcome === AuthorizationOutcome.UNAVAILABLE ? 'warn' : 'debug'
+  safeLog(logger, level, entry, DECISION_EVENT)
+}
+
 /**
  * Evaluates the approved any-role-grants rule for one required capability. Stateless: it holds no
  * authorization data of its own and consumes only the Step 07 and Step 08 cache contracts.
@@ -163,110 +307,7 @@ export function createCapabilityAuthorizer({
   logger,
   now = () => performance.now()
 }) {
-  function evaluate(roleIds, snapshot, { capabilityId, vesselId }, context) {
-    const { capabilitiesByRole, knownCapabilities } = indexOf(snapshot)
-    const base = {
-      capability: capabilityId,
-      definitionsVersion: snapshot.definitionsVersion,
-      ...context
-    }
-
-    if (!knownCapabilities.has(capabilityId)) {
-      return Object.freeze({
-        outcome: AuthorizationOutcome.DENIED,
-        reason: DenialReason.REQUIRED_CAPABILITY_UNKNOWN,
-        ...base
-      })
-    }
-
-    // Assigned roles are `[vessel]--[role]`: the role's capabilities apply to that vessel only
-    let unknownRoleCount = 0
-    const grantingVesselIds = new Set()
-    for (const assignedRoleId of roleIds) {
-      const scoped = parseVesselScopedRole(assignedRoleId)
-      const capabilities = scoped && capabilitiesByRole.get(scoped.roleId)
-      if (!capabilities) {
-        unknownRoleCount += 1
-      } else if (capabilities.has(capabilityId)) {
-        grantingVesselIds.add(scoped.vesselId)
-      }
-    }
-
-    const granted =
-      vesselId === undefined
-        ? grantingVesselIds.size > 0
-        : grantingVesselIds.has(vesselId)
-    if (granted) {
-      return Object.freeze({
-        outcome: AuthorizationOutcome.ALLOWED,
-        ...base,
-        grantedVesselIds: Object.freeze(
-          vesselId === undefined ? [...grantingVesselIds] : [vesselId]
-        ),
-        unknownRoleCount
-      })
-    }
-
-    return Object.freeze({
-      outcome: AuthorizationOutcome.DENIED,
-      reason:
-        unknownRoleCount === roleIds.length
-          ? DenialReason.ALL_ASSIGNED_ROLES_UNKNOWN
-          : DenialReason.CAPABILITY_NOT_GRANTED,
-      ...base,
-      unknownRoleCount
-    })
-  }
-
-  async function decide(user, capability, { vesselId, correlationId, signal }) {
-    if (!isAuthenticatedUserContext(user)) {
-      return unavailable(UnavailableReason.UNTRUSTED_USER_CONTEXT)
-    }
-    if (
-      !issuedCapabilities.has(capability) ||
-      (vesselId !== undefined && !isValidIdentifier(vesselId))
-    ) {
-      return unavailable(UnavailableReason.INVALID_REQUIRED_CAPABILITY)
-    }
-
-    const userRoles = await userRoleCache.getUserRoles(user, {
-      correlationId,
-      signal
-    })
-    if (!userRoles.ok) {
-      return unavailableForUserRoles(userRoles)
-    }
-
-    const { capabilityId } = capability
-    const userRoleCacheState = userRoles.cacheState
-    if (userRoles.value.roleIds.length === 0) {
-      return Object.freeze({
-        outcome: AuthorizationOutcome.DENIED,
-        reason: DenialReason.NO_ASSIGNED_ROLES,
-        capability: capabilityId,
-        userRoleCacheState
-      })
-    }
-
-    const definitions = await roleDefinitionsCache.getRoleDefinitions({
-      correlationId,
-      signal
-    })
-    if (!definitions.ok) {
-      return unavailableForDefinitions(definitions)
-    }
-
-    return evaluate(
-      userRoles.value.roleIds,
-      definitions.snapshot,
-      { capabilityId, vesselId },
-      {
-        userRoleCacheState,
-        roleDefinitionsCacheState: definitions.cacheState,
-        staleDefinitionsUsed: definitions.freshness === SnapshotState.STALE
-      }
-    )
-  }
+  const caches = { userRoleCache, roleDefinitionsCache }
 
   /**
    * @param {Readonly<{ userId: string }>} user the trusted Step 04 authenticated-user context
@@ -284,7 +325,7 @@ export function createCapabilityAuthorizer({
     const startedAt = now()
     let decision
     try {
-      decision = await decide(user, capability, {
+      decision = await decide(caches, user, capability, {
         vesselId,
         correlationId,
         signal
@@ -293,24 +334,7 @@ export function createCapabilityAuthorizer({
       decision = unavailable(UnavailableReason.INTERNAL_FAILURE)
     }
 
-    const entry = {
-      event: 'authorization.decision',
-      outcome: decision.outcome,
-      reason: decision.reason ?? 'granted',
-      capability: decision.capability,
-      definitionsVersion: decision.definitionsVersion,
-      userRoleCacheState: decision.userRoleCacheState,
-      roleDefinitionsCacheState: decision.roleDefinitionsCacheState,
-      staleDefinitionsUsed: decision.staleDefinitionsUsed,
-      unknownRoleCount: decision.unknownRoleCount,
-      correlationId,
-      durationMs: now() - startedAt
-    }
-    if (decision.outcome === AuthorizationOutcome.UNAVAILABLE) {
-      safeLog(logger, 'warn', entry, 'authorization.decision')
-    } else {
-      safeLog(logger, 'debug', entry, 'authorization.decision')
-    }
+    logDecision(logger, decision, correlationId, now() - startedAt)
 
     return decision
   }

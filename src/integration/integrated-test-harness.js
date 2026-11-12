@@ -1,7 +1,7 @@
 import Hapi from '@hapi/hapi'
+import { vi } from 'vitest'
 
 import {
-  createTestSigningKey,
   signTestToken,
   TEST_AUDIENCE,
   TEST_ISSUER,
@@ -29,6 +29,11 @@ export const DEFINITIONS_TTL_SECONDS = 60
 export const DEFINITIONS_MAXIMUM_STALE_SECONDS = 300
 export const MINIMUM_REFRESH_SECONDS = 60
 
+const HTTP_OK = 200
+const MILLISECONDS_PER_SECOND = 1000
+const HTTP_UNAVAILABLE = 503
+const CAPABILITY_READ = 'catch-record.read'
+
 const USER_ROLES_URL =
   'https://user-profile.test.invalid/users/{entraObjectId}/roles'
 const DEFINITIONS_URL =
@@ -49,7 +54,7 @@ export const DEFAULT_DEFINITIONS = Object.freeze([
   {
     roleId: 'Owner',
     capabilityIds: [
-      'catch-record.read',
+      CAPABILITY_READ,
       'catch-record.create',
       'catch-record.update'
     ]
@@ -57,12 +62,12 @@ export const DEFAULT_DEFINITIONS = Object.freeze([
   { roleId: 'Submitter', capabilityIds: ['catch-record.submit'] },
   {
     roleId: 'Skipper',
-    capabilityIds: ['catch-record.read', 'catch-record.amend']
+    capabilityIds: [CAPABILITY_READ, 'catch-record.amend']
   },
-  { roleId: 'ReadOnlyUser', capabilityIds: ['catch-record.read'] }
+  { roleId: 'ReadOnlyUser', capabilityIds: [CAPABILITY_READ] }
 ])
 
-const json = (body, status = 200) =>
+const json = (body, status = HTTP_OK) =>
   new Response(JSON.stringify(body), {
     status,
     headers: { 'content-type': 'application/json' }
@@ -74,6 +79,46 @@ export function createDeferred() {
     release = resolve
   })
   return { promise, release }
+}
+
+function respondWithKeys(world) {
+  return world.jwksMode === 'invalid'
+    ? json({ keys: 'broken' })
+    : json({ keys: world.keys })
+}
+
+async function respondWithDefinitions(world) {
+  await world.definitionsGate?.promise
+  if (world.definitionsMode === 'fail') {
+    return json({}, HTTP_UNAVAILABLE)
+  }
+
+  return json({
+    schemaVersion: '1.0',
+    definitionsVersion: world.definitionsVersion,
+    serviceId:
+      world.definitionsMode === 'wrong-service'
+        ? 'another-service'
+        : 'catch-recording',
+    roles: world.definitionsMode === 'empty' ? [] : world.definitions
+  })
+}
+
+async function respondWithUserRoles(world, url) {
+  await world.userRolesGate?.promise
+  if (world.userRolesMode === 'fail') {
+    return json({}, HTTP_UNAVAILABLE)
+  }
+
+  const userId = decodeURIComponent(
+    url.split('/users/')[1].replace('/roles', '')
+  )
+  return json({
+    schemaVersion: '1.0',
+    definitionsVersion: '1',
+    userId: world.userRolesMode === 'wrong-user' ? 'someone-else' : userId,
+    roles: world.users[userId] ?? []
+  })
 }
 
 /**
@@ -104,40 +149,12 @@ export function createWorld({ signing }) {
       return json(world.metadata)
     }
     if (url === TEST_JWKS_URI) {
-      return world.jwksMode === 'invalid'
-        ? json({ keys: 'broken' })
-        : json({ keys: world.keys })
-    }
-    if (url.includes('/roles-definitions/')) {
-      await world.definitionsGate?.promise
-      if (world.definitionsMode === 'fail') {
-        return json({}, 503)
-      }
-      const body = {
-        schemaVersion: '1.0',
-        definitionsVersion: world.definitionsVersion,
-        serviceId:
-          world.definitionsMode === 'wrong-service'
-            ? 'another-service'
-            : 'catch-recording',
-        roles: world.definitionsMode === 'empty' ? [] : world.definitions
-      }
-      return json(body)
+      return respondWithKeys(world)
     }
 
-    await world.userRolesGate?.promise
-    if (world.userRolesMode === 'fail') {
-      return json({}, 503)
-    }
-    const userId = decodeURIComponent(
-      url.split('/users/')[1].replace('/roles', '')
-    )
-    return json({
-      schemaVersion: '1.0',
-      definitionsVersion: '1',
-      userId: world.userRolesMode === 'wrong-user' ? 'someone-else' : userId,
-      roles: world.users[userId] ?? []
-    })
+    return url.includes('/roles-definitions/')
+      ? respondWithDefinitions(world)
+      : respondWithUserRoles(world, url)
   }
 
   return world
@@ -192,36 +209,8 @@ export function createRecordingDb() {
   return { db: { collection }, writes, reads }
 }
 
-/**
- * Builds the real authentication and authorization pipeline - Entra token validation, signing-key provider,
- * User Profile Service client, both caches, capability engine, enforcement, error mapping, telemetry and the
- * real Catch Recording routes - with only the outside world, the clock and persistence replaced.
- */
-export async function createIntegratedServer({ world, signing }) {
-  const clock = { ms: 0 }
-  const monotonic = () => clock.ms
-  const wallClock = () => new Date(CLOCK_START_MS + clock.ms)
-  const advanceSeconds = (seconds) => {
-    clock.ms += seconds * 1000
-  }
-
-  const logs = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }
-  const metrics = {
-    counter: vi.fn(async () => {}),
-    millis: vi.fn(async () => {})
-  }
-  const persistence = createRecordingDb()
-
-  const server = Hapi.server({
-    routes: { validate: { options: { abortEarly: false }, failAction } }
-  })
-  server.decorate(
-    'server',
-    'securityTelemetry',
-    createSecurityTelemetry({ logger: logs, metrics })
-  )
-  await server.register([requestTracing, errorMapping])
-  await server.register([
+function pipelinePlugins({ world, monotonic, wallClock }) {
+  return [
     {
       plugin: entraSigningKeys,
       options: { entra: ENTRA_CONFIG, fetchFn: world.fetch, now: monotonic }
@@ -261,7 +250,10 @@ export async function createIntegratedServer({ world, signing }) {
     },
     capabilityAuthorizer,
     capabilityEnforcement
-  ])
+  ]
+}
+
+function decorateRequestDoubles(server, persistence) {
   server.decorate('request', 'db', () => persistence.db, { apply: true })
   server.decorate(
     'request',
@@ -275,9 +267,9 @@ export async function createIntegratedServer({ world, signing }) {
     () => ({ retrieveArtifact: vi.fn() }),
     { apply: true }
   )
-  server.route([...catchRecords, ...vesselProfiles])
-  await server.initialize()
+}
 
+function createCallers({ server, signing, wallClock }) {
   /** Signs a synthetic access token at the current simulated time. */
   const token = (claims = {}, options = {}) =>
     signTestToken(options.signing ?? signing, {
@@ -301,6 +293,45 @@ export async function createIntegratedServer({ world, signing }) {
       }
     })
 
+  return { token, call }
+}
+
+/**
+ * Builds the real authentication and authorization pipeline - Entra token validation, signing-key provider,
+ * User Profile Service client, both caches, capability engine, enforcement, error mapping, telemetry and the
+ * real Catch Recording routes - with only the outside world, the clock and persistence replaced.
+ */
+export async function createIntegratedServer({ world, signing }) {
+  const clock = { ms: 0 }
+  const monotonic = () => clock.ms
+  const wallClock = () => new Date(CLOCK_START_MS + clock.ms)
+  const advanceSeconds = (seconds) => {
+    clock.ms += seconds * MILLISECONDS_PER_SECOND
+  }
+
+  const logs = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+  const metrics = {
+    counter: vi.fn(async () => {}),
+    millis: vi.fn(async () => {})
+  }
+  const persistence = createRecordingDb()
+
+  const server = Hapi.server({
+    routes: { validate: { options: { abortEarly: false }, failAction } }
+  })
+  server.decorate(
+    'server',
+    'securityTelemetry',
+    createSecurityTelemetry({ logger: logs, metrics })
+  )
+  await server.register([requestTracing, errorMapping])
+  await server.register(pipelinePlugins({ world, monotonic, wallClock }))
+  decorateRequestDoubles(server, persistence)
+  server.route([...catchRecords, ...vesselProfiles])
+  await server.initialize()
+
+  const { token, call } = createCallers({ server, signing, wallClock })
+
   return {
     server,
     clock,
@@ -314,4 +345,4 @@ export async function createIntegratedServer({ world, signing }) {
   }
 }
 
-export { createTestSigningKey }
+export { createTestSigningKey } from '#/authentication/entra/entra-test-fixtures.js'

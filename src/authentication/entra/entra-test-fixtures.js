@@ -6,6 +6,8 @@ export const TEST_ISSUER = 'https://login.entra.test.invalid/test-tenant/v2.0'
 export const TEST_METADATA_URL = `${TEST_ISSUER}/.well-known/openid-configuration`
 export const TEST_JWKS_URI = 'https://login.entra.test.invalid/test-tenant/keys'
 
+const HTTP_OK = 200
+
 /**
  * Generates a throwaway RSA signing key pair for tests only. The private key never leaves the test
  * process and nothing here is, or resembles, a real Entra key.
@@ -71,7 +73,7 @@ export function createFetchStub(routes) {
 
     const result = typeof route === 'function' ? await route() : route
     if (result.hang) {
-      await new Promise((resolve, reject) => {
+      await new Promise((_resolve, reject) => {
         options.signal?.addEventListener('abort', () =>
           reject(new DOMException('aborted', 'AbortError'))
         )
@@ -83,7 +85,7 @@ export function createFetchStub(routes) {
 
     const body = result.text ?? JSON.stringify(result.json ?? {})
     return new Response(body, {
-      status: result.status ?? 200,
+      status: result.status ?? HTTP_OK,
       headers: result.headers
     })
   }
