@@ -612,3 +612,27 @@ ignored), the server registration, stale `scopes` JSDoc and the examples that us
 - Test authentication uses signed throwaway-key JWTs (`entra-test-fixtures.js`) or the explicit stub validator
   (`authorization-test-fixtures.js`), which accepts only synthetic tokens and exists only in test code.
 - Unrelated mock business data, the mock User Profile Service and reference-data doubles are untouched.
+
+## Integrated test coverage (Step 15)
+
+`src/integration/entra-authorization.integration.test.js` exercises the real pipeline (request tracing, error
+mapping, Entra bearer authentication, signing-key provider, User Profile client, user-role and role-definition
+caches, capability authorizer and enforcement, protected routes and telemetry) through `server.inject`.
+`src/integration/integrated-test-harness.js` supplies a deterministic in-memory world: a fake OIDC metadata,
+JWKS and User Profile Service (with failure modes, call recording and gates for concurrency), injected clocks
+(no real sleeps or timers), throwaway signing keys and a recording database stub that proves whether any read
+or write happened.
+
+Covered: valid and invalid tokens (missing, malformed, fixed legacy tokens, wrong key, `none`, symmetric
+algorithm, issuer, audience, lifetime, identity claim, token role claims ignored); signing-key snapshot reuse,
+single refresh for an unknown `kid`, throttled hostile `kid`s, rollover and invalid refresh retention;
+User Profile path, correlation header and absence of credentials, unknown user, no roles, invalid and failing
+responses (503, not cached); user-role cache hit, TTL boundary, role removal, expired-plus-failed refresh,
+single-flight and user isolation; role-definition cache fresh, TTL refresh, stale window, over-stale fail-closed,
+invalid refresh retention and single-flight; each capability allowed/denied through real routes, exact matching,
+any-role-grants and vessel-scoped paths; no persistence after a denial or unavailable decision; public 401/403/503
+bodies, correlation echo and privacy of logs and metrics.
+
+Known limit: the recording database stub is not a full store, so for allowed requests the tests assert that the
+resource layer was reached (validation or lookup outcome), not full domain behaviour, which is covered by the
+existing domain tests.
