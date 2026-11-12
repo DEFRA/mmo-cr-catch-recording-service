@@ -1,3 +1,4 @@
+import { safeLog } from '#/common/helpers/logging/safe-log.js'
 import { isSigningKeyError, SigningKeyFailure } from './signing-key-failure.js'
 
 const MILLISECONDS_PER_SECOND = 1000
@@ -57,6 +58,7 @@ export function createSigningKeyProvider({
   let lastFailureReason = null
 
   async function runRefresh() {
+    const startedAt = now()
     try {
       const metadata = await metadataClient.fetchMetadata()
       const signingKeys = await jwksClient.fetchSigningKeys(metadata.jwksUri)
@@ -70,9 +72,16 @@ export function createSigningKeyProvider({
           loadedAt + refreshIntervalSeconds * MILLISECONDS_PER_SECOND
       })
       lastFailureReason = null
-      logger?.debug(
-        { keyCount: snapshot.keyIds.length },
-        'Entra signing keys refreshed'
+      safeLog(
+        logger,
+        'info',
+        {
+          event: 'oidc.refresh',
+          outcome: 'success',
+          keyCount: snapshot.keyIds.length,
+          durationMs: loadedAt - startedAt
+        },
+        'oidc.refresh'
       )
 
       return { ok: true }
@@ -81,7 +90,17 @@ export function createSigningKeyProvider({
         ? cause.reason
         : SigningKeyFailure.INTERNAL_ERROR
       lastFailureReason = reason
-      logger?.warn({ reason }, 'Entra signing-key refresh failed')
+      safeLog(
+        logger,
+        'warn',
+        {
+          event: 'oidc.refresh',
+          outcome: 'failure',
+          reason,
+          durationMs: now() - startedAt
+        },
+        'oidc.refresh'
+      )
 
       return { ok: false, reason }
     }
@@ -175,6 +194,18 @@ export function createSigningKeyProvider({
 
     // Absent, due for refresh, or unknown kid: at most one refresh for this resolution, one retry.
     const outcome = await refreshIfAllowed(signal)
+    if (outcome.status === 'throttled') {
+      safeLog(
+        logger,
+        'warn',
+        {
+          event: 'oidc.lookup',
+          outcome: 'throttled',
+          reason: 'refresh-throttled'
+        },
+        'oidc.lookup'
+      )
+    }
     if (outcome.status === 'cancelled') {
       return {
         ok: false,
@@ -186,6 +217,20 @@ export function createSigningKeyProvider({
     const key = snapshot?.getKey(keyId) ?? null
     if (key) {
       return { ok: true, keyId, key }
+    }
+
+    if (outcome.status === 'refreshed') {
+      // Counted without the raw key identifier
+      safeLog(
+        logger,
+        'warn',
+        {
+          event: 'oidc.lookup',
+          outcome: 'unknown-kid',
+          reason: 'key-not-found'
+        },
+        'oidc.lookup'
+      )
     }
 
     return {

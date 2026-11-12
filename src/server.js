@@ -7,6 +7,7 @@ import { router } from '#/plugins/router.js'
 import { requestLogger } from '#/plugins/request-logger.js'
 import { mongoDb } from '#/plugins/mongodb.js'
 import { errorMapping } from '#/plugins/error-mapping.js'
+import { securityTelemetry } from '#/plugins/security-telemetry.js'
 import { entraSigningKeys } from '#/plugins/entra-signing-keys.js'
 import { entraAuthentication } from '#/plugins/entra-authentication.js'
 import { userProfile } from '#/plugins/user-profile-client.js'
@@ -56,6 +57,8 @@ export async function createServer() {
   // pulse               - provides shutdown handlers
   // mongoDb             - sets up mongo connection pool and attaches to `server` and `request` objects
   // errorMapping        - central onPreResponse boundary mapping errors to the safe public HTTP contract
+  // securityTelemetry   - decorates `server.securityTelemetry`: the bounded, privacy-safe logging and
+  //                       metrics sink shared by every authentication and authorization component
   // entraSigningKeys    - decorates `server.entraSigningKeyProvider`, the shared lazily-loaded Entra OIDC
   //                       metadata/JWKS signing-key provider (not yet used to validate tokens)
   // entraAuthentication - registers the `entra-bearer` Hapi auth strategy (local Entra access-token
@@ -88,6 +91,7 @@ export async function createServer() {
       plugin: mongoDb,
       options: config.get('mongo')
     },
+    securityTelemetry,
     errorMapping,
     {
       plugin: entraSigningKeys,

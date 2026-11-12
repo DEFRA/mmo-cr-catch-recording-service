@@ -1,3 +1,4 @@
+import { safeLog } from '#/common/helpers/logging/safe-log.js'
 import { isAuthenticatedUserContext } from '#/authentication/entra/authenticated-user-context.js'
 import { validateUserRolesResult } from './authorization-response-validator.js'
 import { UserProfileOutcome } from './user-profile-client.js'
@@ -66,7 +67,8 @@ export function createUserRoleCache({
   const entries = new Map()
   const refreshes = new Map()
 
-  const emit = (event, fields) => logger?.debug({ event, ...fields }, event)
+  const emit = (event, fields) =>
+    safeLog(logger, 'debug', { event, ...fields }, event)
 
   function evictIfNeeded() {
     if (entries.size <= maximumEntries) {
@@ -115,7 +117,8 @@ export function createUserRoleCache({
   }
 
   async function refresh(user, correlationId) {
-    emit('user-role-cache.refresh-started')
+    emit('user-role-cache.refresh-started', { correlationId })
+    const startedAt = now()
     try {
       const transport = await userProfileClient.getUserRoles(user, {
         correlationId
@@ -124,7 +127,10 @@ export function createUserRoleCache({
 
       if (result.ok) {
         publish(user.userId, result.value)
-        emit('user-role-cache.refresh-succeeded')
+        emit('user-role-cache.refresh-succeeded', {
+          correlationId,
+          durationMs: now() - startedAt
+        })
         return Object.freeze({
           ok: true,
           value: result.value,
@@ -132,14 +138,25 @@ export function createUserRoleCache({
         })
       }
 
-      logger?.warn(
-        { event: 'user-role-cache.refresh-failed', source: result.source },
+      safeLog(
+        logger,
+        'warn',
+        {
+          event: 'user-role-cache.refresh-failed',
+          source: result.source,
+          outcome: result.outcome,
+          reason: result.reason,
+          correlationId,
+          durationMs: now() - startedAt
+        },
         'user-role-cache.refresh-failed'
       )
       return result
     } catch {
-      logger?.warn(
-        { event: 'user-role-cache.unexpected-error' },
+      safeLog(
+        logger,
+        'warn',
+        { event: 'user-role-cache.unexpected-error', correlationId },
         'user-role-cache.unexpected-error'
       )
       return cacheFailure(UserRoleCacheFailure.UNEXPECTED_CACHE_FAILURE)

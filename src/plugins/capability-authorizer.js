@@ -16,7 +16,7 @@ export const capabilityAuthorizer = {
           ? createCapabilityAuthorizer({
               userRoleCache: server.userRoleCache,
               roleDefinitionsCache: server.roleDefinitionsCache,
-              logger: server.logger
+              logger: server.securityTelemetry ?? server.logger
             })
           : null
 

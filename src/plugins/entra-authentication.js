@@ -29,7 +29,8 @@ export const entraAuthentication = {
       server.auth.scheme(ENTRA_AUTH_STRATEGY, entraAuthenticationScheme)
       server.auth.strategy(ENTRA_AUTH_STRATEGY, ENTRA_AUTH_STRATEGY, {
         validator,
-        userIdClaim: entra.userIdClaim
+        userIdClaim: entra.userIdClaim,
+        telemetry: server.securityTelemetry
       })
     }
   }

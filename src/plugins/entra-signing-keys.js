@@ -53,7 +53,10 @@ export const entraSigningKeys = {
       server.decorate(
         'server',
         'entraSigningKeyProvider',
-        createEntraSigningKeyProvider({ ...options, logger: server.logger })
+        createEntraSigningKeyProvider({
+          ...options,
+          logger: server.securityTelemetry ?? server.logger
+        })
       )
     }
   }

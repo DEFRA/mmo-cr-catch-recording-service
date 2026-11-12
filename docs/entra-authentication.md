@@ -496,3 +496,90 @@ format, category or header scheme is introduced. The detailed reason is never pu
 - **Logging.** One `access-response` warning per `401`/`403`/`503` with only the bounded category, status,
   internal reason constant and correlation id - never tokens, headers, claims, identifiers, roles,
   capability maps or response bodies. Broader telemetry is Step 13.
+
+## Security logging, metrics and correlation (Step 13)
+
+Code: `src/authorization/security-telemetry.js` and the `securityTelemetry` plugin
+(`src/plugins/security-telemetry.js`, registered right after `@defra/cdp-metrics`), plus
+`src/common/helpers/logging/safe-log.js`. Every authentication and authorization component writes to one
+sink, `server.securityTelemetry`, which is a drop-in structured logger that
+
+1. keeps only an **allow-list of bounded, safe fields** (event, outcome, reason category, operation, status
+   code, cache state, duration, correlation id, ...) - tokens, headers, claims, identifiers, roles,
+   capability maps, URLs, response bodies, key ids and error objects are dropped before any log line or
+   metric exists;
+2. writes one structured line through the existing pino/ECS logger (the trace id is also added to every
+   line by the existing logger mixin); and
+3. counts the event, and records latency in milliseconds, through the existing `@defra/cdp-metrics`
+   instance (`server.metrics`) with only enumerated dimensions.
+
+Telemetry reports outcomes; it never decides them. Every log and metric call is guarded (`safeLog`, and
+sink failures are swallowed), so an unavailable sink cannot fail a request, change an authentication or
+authorization decision, or fail open.
+
+### Correlation
+
+The existing `x-cdp-request-id` (`@defra/hapi-tracing`) is the only correlation value. It appears in
+structured logs and the public error body, is propagated unchanged to both User Profile Service calls
+(including across a retry), and is **never** a metric dimension, cache key, identity or permission
+evidence. Startup role-definition loading has no incoming request and is logged without a correlation id (a
+request id is not faked).
+
+### Events and metrics
+
+Counters carry `Count`; latency metrics are milliseconds. Dimensions are the only labels used.
+
+| Event (log `event`)             | Level                                                            | Counter                          | Latency (ms)               | Dimensions                                                                                                                                                                                                                               |
+| ------------------------------- | ---------------------------------------------------------------- | -------------------------------- | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `auth.token-validation`         | debug success; info credential failure; warn key-source/internal | `authTokenValidations`           | `authTokenValidationMs`    | `outcome`, `reason` = `authenticated` \| `missing` \| `malformed` \| `algorithm` \| `key` \| `key-source` \| `signature` \| `issuer` \| `audience` \| `expired` \| `not-yet-valid` \| `identity-claim` \| `identity-claim-or-unexpected` |
+| `oidc.refresh`                  | info success; warn failure                                       | `authSigningKeyRefreshes`        | `authSigningKeyRefreshMs`  | `outcome`, `reason` (a signing-key failure constant)                                                                                                                                                                                     |
+| `oidc.lookup`                   | warn                                                             | `authSigningKeyLookups`          | -                          | `outcome` = `unknown-kid` \| `throttled`, `reason` (no raw `kid`)                                                                                                                                                                        |
+| `user-profile.request`          | debug success; warn failure                                      | `authUserProfileRequests`        | `authUserProfileRequestMs` | `operation` = `user-roles` \| `role-definitions`, `outcome`                                                                                                                                                                              |
+| `user-profile.retry`            | warn                                                             | `authUserProfileRetries`         | -                          | `operation`                                                                                                                                                                                                                              |
+| `user-role-cache.*`             | debug (warn on failure)                                          | `authUserRoleCacheEvents`        | -                          | `result` = `hit` \| `miss` \| `expired` \| `refresh-started` \| `refresh-succeeded` \| `refresh-failed` \| `refresh-coalesced` \| `entry-inserted` \| `entry-replaced` \| `entry-evicted` \| `capacity-reached` \| `unexpected-error`    |
+| `role-definitions-cache.*`      | debug (warn on failure)                                          | `authRoleDefinitionsCacheEvents` | -                          | `result` = the cache results above plus `load`, `stale`, `over-stale`, `stale-used`                                                                                                                                                      |
+| `authorization.decision`        | debug allowed/denied; warn unavailable                           | `authDecisions`                  | `authDecisionMs`           | `outcome`, `reason` (`granted` or a denial/unavailable constant)                                                                                                                                                                         |
+| `authorization.missing-mapping` | warn                                                             | `authMissingMappings`            | -                          | none                                                                                                                                                                                                                                     |
+| `access-response`               | info 401/403; warn authorization-unavailable 503                 | `authHttpOutcomes`               | -                          | `statusCode`, `category`                                                                                                                                                                                                                 |
+
+Log-only fields (never dimensions): `correlationId`, `capability` (always one of the five catalogue
+values), `definitionsVersion`, `staleDefinitionsUsed`, `unknownRoleCount`, `keyCount`, `status`, `attempt`.
+A new event or an unlisted cache result produces a log line but no metric.
+
+Severity: expected `401`/`403` are never errors. Credential-level token failures log at info (below
+warning, to limit flooding from repeated invalid tokens); aggregate counters are never suppressed. No
+sampling framework exists in the repository and none was added.
+
+### Recommended alerts (to be calibrated; no thresholds are defined or deployed)
+
+Evaluate each over a rolling window against a baseline taken from production traffic and the service-level
+objectives; none of these is configured by this repository.
+
+1. Sustained increase in `authTokenValidations{outcome=failure}`, by `reason`.
+2. Repeated `authSigningKeyRefreshes{outcome=failure}`, or any `reason=key-source` validation failures
+   (an Entra metadata/JWKS outage surfaces to callers as `401`).
+3. `authSigningKeyLookups{outcome=unknown-kid}` bursts.
+4. `authUserProfileRequests` timeout/server-failure increase and `authUserProfileRetries` growth.
+5. `authUserRoleCacheEvents{result=refresh-failed}` increase.
+6. `authRoleDefinitionsCacheEvents{result=refresh-failed}`.
+7. Any `authRoleDefinitionsCacheEvents{result=stale-used}` (running on stale definitions).
+8. `authRoleDefinitionsCacheEvents{result=over-stale}` (maximum stale exhausted - authorization fails closed).
+9. `authHttpOutcomes{statusCode=503}` increase.
+10. Any `authMissingMappings` (a configuration defect).
+11. `authDecisions{reason=INTERNAL_FAILURE}` and unexpected-error cache results.
+12. A material drop in user-role cache hit rate (`hit` versus `miss`/`expired`).
+
+### Health and tracing
+
+- `/health` is unchanged and remains an unauthenticated, dependency-free liveness probe, so an Entra or User
+  Profile Service outage cannot fail liveness. The role-definition cache exposes `getStatus()`
+  (`absent` / `fresh` / `stale` / `over-stale` plus the definitions version, no definitions) and the
+  signing-key provider holds a valid-snapshot state, but no readiness endpoint exists in the repository and
+  none was invented. **Gap:** readiness reporting of authorization dependencies is not implemented.
+- The repository uses no distributed-tracing spans beyond the trace id, so none were added.
+
+### Privacy
+
+Logs and metrics contain no token, header, claim, user identifier, role, capability map, definitions body,
+key id, issuer/audience value, URL or catch-record data. Retention of the correlation id follows the
+platform log-retention policy.

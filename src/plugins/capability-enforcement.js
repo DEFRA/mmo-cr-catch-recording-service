@@ -12,6 +12,19 @@ import { readRouteAuthorization } from '#/authorization/protected-route.js'
 
 const PLUGIN_NAME = 'capability-enforcement'
 
+// An unmapped protected route is a configuration defect: always a warning with no route or user detail
+function reportMissingMapping(server) {
+  server.securityTelemetry?.warn(
+    {
+      event: 'authorization.missing-mapping',
+      outcome: 'failure',
+      reason: 'missing-capability-mapping',
+      correlationId: getTraceId()
+    },
+    'authorization.missing-mapping'
+  )
+}
+
 const isProtected = (route) => Boolean(route.settings.auth)
 
 function describeInvalidRoutes(server) {
@@ -78,6 +91,7 @@ export const capabilityEnforcement = {
 
         const { capability, vesselIdParam } = readRouteAuthorization(request)
         if (!capability) {
+          reportMissingMapping(server)
           throw missingMappingError()
         }
 
@@ -85,6 +99,7 @@ export const capabilityEnforcement = {
           ? request.params[vesselIdParam]
           : undefined
         if (vesselIdParam && typeof vesselId !== 'string') {
+          reportMissingMapping(server)
           throw missingMappingError()
         }
 

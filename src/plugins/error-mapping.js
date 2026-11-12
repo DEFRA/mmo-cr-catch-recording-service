@@ -41,10 +41,17 @@ export const errorMapping = {
 
         if (
           isApplicationError(response) &&
-          ACCESS_CATEGORIES.has(response.category)
+          ACCESS_CATEGORIES.has(response.category) &&
+          // Authorization outcomes always carry a bounded reason; other 503s (e.g. reference data) do not
+          (response.category !== 'DEPENDENCY_UNAVAILABLE' ||
+            response.meta?.reason)
         ) {
-          // Only bounded categories: never the token, claims, identifier, roles or the internal cause
-          request.logger?.warn(
+          // Only bounded categories: never the token, claims, identifier, roles or the internal cause.
+          // Expected 401/403 are informational; an unavailable authorization source is a warning.
+          const sink = server.securityTelemetry ?? request.logger
+          const level =
+            response.category === 'DEPENDENCY_UNAVAILABLE' ? 'warn' : 'info'
+          sink?.[level]?.(
             {
               event: 'access-response',
               category: response.category,

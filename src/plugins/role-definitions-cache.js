@@ -20,7 +20,7 @@ export const roleDefinitionsCache = {
         ? createRoleDefinitionsCache({
             ...options,
             userProfileClient: server.userProfileClient,
-            logger: server.logger
+            logger: server.securityTelemetry ?? server.logger
           })
         : null
 

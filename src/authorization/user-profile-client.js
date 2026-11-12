@@ -1,3 +1,4 @@
+import { safeLog } from '#/common/helpers/logging/safe-log.js'
 import { isAuthenticatedUserContext } from '#/authentication/entra/authenticated-user-context.js'
 import {
   readBoundedText,
@@ -201,14 +202,17 @@ export function createUserProfileClient({
         break
       }
 
-      logger?.warn(
+      safeLog(
+        logger,
+        'warn',
         {
+          event: 'user-profile.retry',
           operation,
           outcome: result.outcome,
           status: result.status,
           attempt: attemptNumber + 1
         },
-        'User Profile Service request will be retried'
+        'user-profile.retry'
       )
       await sleepFn(userProfileRetryDelayMs, signal)
       if (signal?.aborted) {
@@ -218,15 +222,17 @@ export function createUserProfileClient({
     }
 
     const logEntry = {
+      event: 'user-profile.request',
       operation,
+      correlationId,
       outcome: result.ok ? 'SUCCESS' : result.outcome,
       status: result.ok ? HTTP_STATUS_OK : result.status,
       durationMs: Date.now() - startedAt
     }
     if (result.ok) {
-      logger?.debug(logEntry, 'User Profile Service request completed')
+      safeLog(logger, 'debug', logEntry, 'user-profile.request')
     } else {
-      logger?.warn(logEntry, 'User Profile Service request failed')
+      safeLog(logger, 'warn', logEntry, 'user-profile.request')
     }
 
     return result

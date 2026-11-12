@@ -1,3 +1,4 @@
+import { safeLog } from '#/common/helpers/logging/safe-log.js'
 import { validateRoleDefinitionsResult } from './authorization-response-validator.js'
 import { UserProfileOutcome } from './user-profile-client.js'
 
@@ -89,7 +90,8 @@ export function createRoleDefinitionsCache({
   let snapshot = null
   let inFlightRefresh = null
 
-  const emit = (event, fields) => logger?.debug({ event, ...fields }, event)
+  const emit = (event, fields) =>
+    safeLog(logger, 'debug', { event, ...fields }, event)
 
   function stateOf(held) {
     if (!held) {
@@ -122,7 +124,8 @@ export function createRoleDefinitionsCache({
   }
 
   async function refresh(correlationId) {
-    emit('role-definitions-cache.refresh-started')
+    emit('role-definitions-cache.refresh-started', { correlationId })
+    const startedAt = now()
     try {
       const transport = await userProfileClient.getRoleDefinitions({
         correlationId
@@ -132,22 +135,30 @@ export function createRoleDefinitionsCache({
       if (result.ok) {
         const published = publish(result.value)
         emit('role-definitions-cache.refresh-succeeded', {
-          definitionsVersion: published.definitionsVersion
+          definitionsVersion: published.definitionsVersion,
+          correlationId,
+          durationMs: now() - startedAt
         })
         return Object.freeze({ ok: true, snapshot: published })
       }
 
-      logger?.warn(
+      safeLog(
+        logger,
+        'warn',
         {
           event: 'role-definitions-cache.refresh-failed',
-          ...describeFailure(result)
+          ...describeFailure(result),
+          correlationId,
+          durationMs: now() - startedAt
         },
         'role-definitions-cache.refresh-failed'
       )
       return result
     } catch {
-      logger?.warn(
-        { event: 'role-definitions-cache.unexpected-error' },
+      safeLog(
+        logger,
+        'warn',
+        { event: 'role-definitions-cache.unexpected-error', correlationId },
         'role-definitions-cache.unexpected-error'
       )
       return Object.freeze({
@@ -191,7 +202,7 @@ export function createRoleDefinitionsCache({
     // Re-evaluated now: waiting for the refresh must not let a snapshot outlive its maximum-stale boundary
     const previousState = stateOf(previous)
     if (previousState === SnapshotState.STALE) {
-      emit('role-definitions-cache.stale-used')
+      emit('role-definitions-cache.stale-used', { staleDefinitionsUsed: true })
       return Object.freeze({
         ok: true,
         snapshot: previous,

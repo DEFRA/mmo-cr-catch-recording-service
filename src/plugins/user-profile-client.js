@@ -24,7 +24,10 @@ export const userProfile = {
       server.decorate(
         'server',
         'userProfileClient',
-        createConfiguredUserProfileClient({ ...options, logger: server.logger })
+        createConfiguredUserProfileClient({
+          ...options,
+          logger: server.securityTelemetry ?? server.logger
+        })
       )
     }
   }

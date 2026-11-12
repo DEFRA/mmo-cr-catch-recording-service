@@ -194,7 +194,10 @@ describe('#createSigningKeyProvider', () => {
         ok: true,
         key: 'key-a'
       })
-      expect(logger.warn).toHaveBeenCalledTimes(1)
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ event: 'oidc.refresh', outcome: 'failure' }),
+        expect.any(String)
+      )
     }
   )
 

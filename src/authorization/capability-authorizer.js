@@ -1,3 +1,4 @@
+import { safeLog } from '#/common/helpers/logging/safe-log.js'
 import { isAuthenticatedUserContext } from '#/authentication/entra/authenticated-user-context.js'
 import { isValidIdentifier } from './authorization-response-validator.js'
 import { UserProfileOutcome } from './user-profile-client.js'
@@ -154,11 +155,13 @@ function unavailableForDefinitions(failure) {
  * @param {{ getUserRoles: Function }} options.userRoleCache Step 07
  * @param {{ getRoleDefinitions: Function }} options.roleDefinitionsCache Step 08
  * @param {{ debug: Function, warn: Function }} [options.logger]
+ * @param {() => number} [options.now] monotonic millisecond clock for decision latency
  */
 export function createCapabilityAuthorizer({
   userRoleCache,
   roleDefinitionsCache,
-  logger
+  logger,
+  now = () => performance.now()
 }) {
   function evaluate(roleIds, snapshot, { capabilityId, vesselId }, context) {
     const { capabilitiesByRole, knownCapabilities } = indexOf(snapshot)
@@ -278,6 +281,7 @@ export function createCapabilityAuthorizer({
     capability,
     { vesselId, correlationId, signal } = {}
   ) {
+    const startedAt = now()
     let decision
     try {
       decision = await decide(user, capability, {
@@ -292,17 +296,20 @@ export function createCapabilityAuthorizer({
     const entry = {
       event: 'authorization.decision',
       outcome: decision.outcome,
-      reason: decision.reason,
+      reason: decision.reason ?? 'granted',
       capability: decision.capability,
       definitionsVersion: decision.definitionsVersion,
       userRoleCacheState: decision.userRoleCacheState,
       roleDefinitionsCacheState: decision.roleDefinitionsCacheState,
-      correlationId
+      staleDefinitionsUsed: decision.staleDefinitionsUsed,
+      unknownRoleCount: decision.unknownRoleCount,
+      correlationId,
+      durationMs: now() - startedAt
     }
     if (decision.outcome === AuthorizationOutcome.UNAVAILABLE) {
-      logger?.warn(entry, 'authorization.decision')
+      safeLog(logger, 'warn', entry, 'authorization.decision')
     } else {
-      logger?.debug(entry, 'authorization.decision')
+      safeLog(logger, 'debug', entry, 'authorization.decision')
     }
 
     return decision

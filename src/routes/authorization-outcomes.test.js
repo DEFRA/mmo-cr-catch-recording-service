@@ -7,6 +7,7 @@ import { Capability } from '#/authorization/capabilities.js'
 import { createCapabilityAuthorizer } from '#/authorization/capability-authorizer.js'
 import { protectedRoute } from '#/authorization/protected-route.js'
 import { UserProfileOutcome } from '#/authorization/user-profile-client.js'
+import { createSecurityTelemetry } from '#/authorization/security-telemetry.js'
 import { failAction } from '#/common/helpers/fail-action.js'
 import { capabilityEnforcement } from '#/plugins/capability-enforcement.js'
 import { errorMapping } from '#/plugins/error-mapping.js'
@@ -54,12 +55,16 @@ async function createServer({
   const server = Hapi.server({
     routes: { validate: { options: { abortEarly: false }, failAction } }
   })
-  const warn = vi.fn()
-  server.logger = { warn, debug: () => {} }
-  server.ext('onRequest', (request, h) => {
-    request.logger = { warn }
-    return h.continue
-  })
+  const logs = { debug: vi.fn(), info: vi.fn(), warn: vi.fn() }
+  const metrics = {
+    counter: vi.fn(async () => {}),
+    millis: vi.fn(async () => {})
+  }
+  server.decorate(
+    'server',
+    'securityTelemetry',
+    createSecurityTelemetry({ logger: logs, metrics })
+  )
   await server.register([requestTracing, errorMapping])
   await server.register({
     plugin: {
@@ -115,7 +120,7 @@ async function createServer({
     handler
   })
 
-  return { server, handler, warn }
+  return { server, handler, logs, metrics }
 }
 
 const validValidator = async () => ({
@@ -139,7 +144,7 @@ describe('public authentication and authorization outcomes', () => {
     test.each(Object.values(AccessTokenFailure).map((reason) => [reason]))(
       'Should return one generic 401 with a Bearer challenge for the internal reason %s',
       async (reason) => {
-        const { server, handler, warn } = await createServer({
+        const { server, handler, logs } = await createServer({
           validate: async () => ({ ok: false, reason, source: 'credentials' }),
           roles: defaultRoles,
           definitions: async () => defsOk()
@@ -156,7 +161,7 @@ describe('public authentication and authorization outcomes', () => {
           correlationId: TRACE
         })
         expect(handler).not.toHaveBeenCalled()
-        expect(warn).toHaveBeenCalledWith(
+        expect(logs.info).toHaveBeenCalledWith(
           expect.objectContaining({
             event: 'access-response',
             category: 'AUTHENTICATION_FAILURE',
@@ -407,7 +412,7 @@ describe('public authentication and authorization outcomes', () => {
     })
 
     test('Should not log identifiers, roles or tokens when emitting an access response', async () => {
-      const { server, warn } = await createServer({
+      const { server, logs } = await createServer({
         validate: validValidator,
         roles: async () => rolesOk(['VRO5--Ghost']),
         definitions: async () => defsOk()
@@ -415,7 +420,11 @@ describe('public authentication and authorization outcomes', () => {
 
       await send(server, { authorization: 'Bearer secret-token-value' })
 
-      const logged = JSON.stringify(warn.mock.calls)
+      const logged = JSON.stringify([
+        ...logs.debug.mock.calls,
+        ...logs.info.mock.calls,
+        ...logs.warn.mock.calls
+      ])
       expect(logged).toContain('access-response')
       expect(logged).not.toMatch(/secret-token-value|owner-1|VRO5|Ghost/)
     })
