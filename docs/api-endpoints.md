@@ -9,9 +9,10 @@
 
 ## Conventions used below
 
-- **Auth** — `authentication-service` means the route requires a trusted bearer token (see
-  [`docs/catch-recording-authentication.md`](./catch-recording-authentication.md)); `none` means the
-  route is unauthenticated.
+- **Auth** — `Entra + <capability>` means the route requires a valid Microsoft Entra External ID
+  access token and that the caller holds the named capability through their User Profile Service roles (see
+  [`docs/entra-authentication.md`](./entra-authentication.md)); fixed static tokens are no longer accepted.
+  `none` means the route is unauthenticated.
 - **`{param}`** — a path parameter.
 - All Catch Recording business endpoints are versioned under `/v1`.
 - Every endpoint validates its transport shape with Joi and returns the safe, central error shape

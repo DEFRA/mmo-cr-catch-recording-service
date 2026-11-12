@@ -583,3 +583,32 @@ objectives; none of these is configured by this repository.
 Logs and metrics contain no token, header, claim, user identifier, role, capability map, definitions body,
 key id, issuer/audience value, URL or catch-record data. Retention of the correlation id follows the
 platform log-retention policy.
+
+## Legacy authentication removal (Step 14)
+
+The fixed-token / Authentication Service flow is gone; there is one authoritative request path:
+
+```text
+Bearer credential -> Entra JWT validation -> trusted { userId } context -> capability authorization
+```
+
+Removed: the `authentication-service` Hapi strategy, scheme, plugin, client, `{ userId, scopes }` context
+mapper and error factory (and their tests), the `authentication.*` configuration group and the
+`AUTHENTICATION_SERVICE_URL` / `AUTHENTICATION_SERVICE_TIMEOUT_MS` / `AUTHENTICATION_SERVICE_RETRY_COUNT` /
+`AUTHENTICATION_SERVICE_RETRY_DELAY_MS` variables (no deprecated no-op is kept: an old variable is simply
+ignored), the server registration, stale `scopes` JSDoc and the examples that used fixed tokens.
+
+- A fixed string (`read-token`, `write-token`, `admin-token`, `mock-token`) or any non-JWT now enters the Entra
+  validation path and is rejected with the generic `401`; no principal is created and no handler runs.
+- No fallback exists: not on Entra failure, not when Entra is unconfigured (every token is then rejected), and
+  not in development.
+- Tokens grant nothing by themselves: roles, scopes and groups in a token are ignored; roles come only from the
+  User Profile Service and grants only from its role definitions.
+- Verified by `src/server.authentication.test.js`, which builds the real server: no legacy strategy can be
+  referenced, every protected route uses `entra-bearer` only, fixed and arbitrary tokens, wrong-key, wrong-audience
+  and unsigned tokens are rejected without any User Profile Service call, a valid signed token authorizes through
+  the mock User Profile Service responses only (the token is never forwarded), token role claims are ignored, and
+  `/health` stays public.
+- Test authentication uses signed throwaway-key JWTs (`entra-test-fixtures.js`) or the explicit stub validator
+  (`authorization-test-fixtures.js`), which accepts only synthetic tokens and exists only in test code.
+- Unrelated mock business data, the mock User Profile Service and reference-data doubles are untouched.

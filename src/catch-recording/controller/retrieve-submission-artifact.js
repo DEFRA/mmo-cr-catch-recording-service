@@ -63,7 +63,7 @@ function buildSafeFilename({ catchRecordReference, submissionNumber, type }) {
  * @param {Object} input
  * @param {import('mongodb').Db} input.db
  * @param {object} input.catchArtifactStore the Step 33 `CatchArtifact` storage adapter
- * @param {{ userId: string, scopes: ReadonlyArray<string> }} input.authenticationContext
+ * @param {{ userId: string }} input.authenticationContext
  * @param {string} input.catchRecordId
  * @param {number} input.submissionNumber
  * @param {unknown} input.artifactType the public `json`/`pdf` URL segment

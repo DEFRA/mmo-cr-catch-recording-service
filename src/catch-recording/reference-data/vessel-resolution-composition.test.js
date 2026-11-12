@@ -1,5 +1,4 @@
 import { resolveVessel } from './vessel-resolution.js'
-import { createAuthenticationContext } from '#/catch-recording/controller/authentication-context.js'
 
 /**
  * Proves real composition across Steps 13, 14, and 15: a real Step 13 authentication context, the real
@@ -8,10 +7,7 @@ import { createAuthenticationContext } from '#/catch-recording/controller/authen
  */
 describe('#vessel-resolution composition (Steps 13 -> 14 -> 15 -> snapshot)', () => {
   test('Should compose a real authentication context with real Step 14 policy and resolve a snapshot', async () => {
-    const authenticationContext = createAuthenticationContext({
-      actorId: 'user-1',
-      permissions: ['catch-recording.read']
-    })
+    const authenticationContext = Object.freeze({ userId: 'user-1' })
     const client = {
       getVesselById: vi.fn().mockResolvedValue({
         id: 'vessel-1',
@@ -35,10 +31,7 @@ describe('#vessel-resolution composition (Steps 13 -> 14 -> 15 -> snapshot)', ()
   })
 
   test('Should compose a real authentication context and deny via the real Step 14 policy for an inaccessible vessel', async () => {
-    const authenticationContext = createAuthenticationContext({
-      actorId: 'user-1',
-      permissions: []
-    })
+    const authenticationContext = Object.freeze({ userId: 'user-1' })
     const client = {
       getVesselById: vi.fn().mockResolvedValue({
         id: 'vessel-1',

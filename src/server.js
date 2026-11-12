@@ -15,7 +15,6 @@ import { userRoleCache } from '#/plugins/user-role-cache.js'
 import { roleDefinitionsCache } from '#/plugins/role-definitions-cache.js'
 import { capabilityAuthorizer } from '#/plugins/capability-authorizer.js'
 import { capabilityEnforcement } from '#/plugins/capability-enforcement.js'
-import { authenticationPlugin } from '#/catch-recording/controller/authentication-plugin.js'
 import { referenceDataPlugin } from '#/catch-recording/controller/reference-data-plugin.js'
 import { catchArtifactPlugin } from '#/catch-recording/controller/catch-artifact-plugin.js'
 import { failAction } from '#/common/helpers/fail-action.js'
@@ -74,8 +73,6 @@ export async function createServer() {
   // capabilityEnforcement - the single onPostAuth capability check for every authenticated route (route
   //                       metadata via `protectedRoute`); fails closed and refuses to start on a protected
   //                       route without a catalogue capability
-  // authenticationPlugin - registers the trusted `authentication-service` Hapi auth scheme/strategy
-  //                        (Step 13); dormant until a route opts in via `auth: 'authentication-service'`
   // referenceDataPlugin  - decorates `request.referenceDataClient` with the Step 15 Reference Data
   //                        Service client (built once from config)
   // catchArtifactPlugin  - decorates `request.catchArtifactStore` with the Step 33 S3-compatible
@@ -127,13 +124,6 @@ export async function createServer() {
     },
     capabilityAuthorizer,
     capabilityEnforcement,
-    {
-      plugin: authenticationPlugin,
-      options: {
-        ...config.get('authentication'),
-        tracingHeader: config.get('tracing.header')
-      }
-    },
     {
       plugin: referenceDataPlugin,
       options: {

@@ -85,6 +85,10 @@ it.
 
 ### Trusted authentication (Step 13)
 
+> **Superseded and removed.** The Authentication Service based flow described here was replaced by Microsoft
+> Entra External ID token validation and User Profile Service capability authorization (see
+> [`entra-authentication.md`](./entra-authentication.md)). The `authentication.*` settings no longer exist.
+
 The Authorisation Service does not yet have a confirmed real contract; a mock instance
 (`mmo-cr-authentication-service`) currently authorises every request. Catch Recording integrates against
 its real (mocked) HTTP contract directly, mirroring the already-implemented client in
@@ -557,7 +561,7 @@ remained unresolved until now. Resolved with the user as follows:
 
 > Configuration contracts only. The runtime does **not** yet validate Entra tokens, call the User Profile
 > Service or evaluate capabilities — those are later Entra implementation steps. The existing
-> Authentication Service based flow is unchanged until the legacy removal step.
+> The legacy Authentication Service flow has since been removed.
 
 Defined in `src/config.js`; validated at startup by
 `src/common/helpers/convict/validate-entra-authorization-config.js`. Error messages name the invalid field
