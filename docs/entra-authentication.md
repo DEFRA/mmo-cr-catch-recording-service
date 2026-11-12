@@ -398,3 +398,58 @@ owner's instruction (route, controller, scope-based `completion-policy.js`, Open
 **Vessel routes.** Vessel favourites and skippers were mapped to read/update because assigned roles are
 vessel-scoped (`[vessel]--[role]`), on the product owner's guidance; confirm this is the intended
 semantics before production.
+
+## Composition of capability, resource and domain authorization (Step 11)
+
+A protected operation runs only when **all** layers succeed:
+
+```text
+authenticated (Step 03/04)  AND  capability granted (Step 09/10)  AND  resource access  AND  domain rules  ->  execute
+```
+
+| Layer            | Where it runs                                           | Authoritative component                                                                                                                            |
+| ---------------- | ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Authentication   | Hapi auth (`entra-bearer`)                              | Step 03/04                                                                                                                                         |
+| Capability       | `onPostAuth`, before payload validation and the handler | `capabilityEnforcement` -> Step 09 engine, capability from route metadata                                                                          |
+| Input validation | Hapi route `validate` (after capability)                | existing Joi schemas                                                                                                                               |
+| Resource access  | inside the controller, as part of the lookup            | owner-scoped persistence predicates (`ownerUserId` in the query), the vessel-access policy for vessel profiles and draft creation (Reference Data) |
+| Domain rules     | inside the controller, after resource lookup            | existing lifecycle / completeness / transition rules                                                                                               |
+| Execution        | persistence writes                                      | only after the layers above                                                                                                                        |
+
+Because the capability check is a single `onPostAuth` boundary that applies to every authenticated route
+(and the server refuses to start otherwise), no handler, controller, repository or reference-data call runs
+after a denied or unavailable decision, and a failed authentication never reaches it. The composition is
+tested in `src/routes/authorization-composition.test.js` (every protected route stops on denial,
+unavailability and internal failure with no collection access, no write and no reference-data call; an
+allowed capability does not bypass the owner-scoped lookup, which still returns the masked `404` with no
+write; invalid input is rejected only after the capability is granted; ownership never replaces the
+capability), alongside the existing route tests for the domain rules (`409`/`422`) behind an allowed
+capability.
+
+- **Capability does not replace resource access.** `read`, `update`, `submit` and `amend` never grant
+  access to another owner's record: lookups are scoped to the trusted `userId`, and a record that is not the
+  caller's remains a masked `404` (resource-existence masking is preserved and is not revealed by the
+  capability layer).
+- **Resource access does not replace the capability.** Ownership, vessel association and prior submission
+  never substitute for the capability (submit needs `catch-record.submit`, amend `catch-record.amend`;
+  `update` alone reaches neither).
+- **Create.** `catch-record.create` is checked before any reference-data call or record creation; the
+  existing vessel-access rule then applies and only then is the empty `DRAFT` created.
+- **Side effects.** All mutations (record writes, history, idempotency claims, artifacts, favourite and
+  skipper updates) happen in controllers after the capability gate; no event or audit success is emitted
+  before it.
+- **Distinct internal outcomes** are preserved (`denied`, `unavailable`, resource `404`, domain `409`/`422`,
+  validation `400`); public response shaping is finalised in Step 12.
+- **Bypasses closed.** There is one route table; every authenticated route must be `protectedRoute`-declared
+  or the server does not start; the removed completion route no longer exists; there are no internal or
+  scheduled callers of these use cases.
+
+Open items (not changed here because the step forbids new ownership or vessel rules):
+
+- Vessel scope is enforced for the vessel routes (`/v1/vessels/{vesselId}/...`) from the path. For
+  operations on a catch record, or draft creation (vessel in the payload), the capability is granted if a role
+  grants it for **any** vessel and the existing owner / reference-data vessel-access rules decide the rest.
+  Requiring the capability for the record's or payload's specific vessel would be a new vessel rule and needs
+  a product decision (`grantedVesselIds` is already available through `getCapabilityDecision(request)`).
+  Recommended before production.
+- `GET /v1/catch-records` (listing) is capability- and owner-scoped but not vessel-filtered, for the same reason.
