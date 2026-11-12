@@ -56,6 +56,14 @@ function mapUnexpectedError(correlationId) {
   }
 }
 
+// RFC 6750: a generic Bearer challenge with no realm, error or error_description, so it reveals nothing
+// about why the credentials were rejected
+const BEARER_CHALLENGE = Object.freeze({ 'WWW-Authenticate': 'Bearer' })
+
+function challengeHeaders(category) {
+  return category === 'AUTHENTICATION_FAILURE' ? { ...BEARER_CHALLENGE } : {}
+}
+
 function mapApplicationError(error, correlationId) {
   const definition = getCategoryDefinition(error.category)
 
@@ -74,7 +82,7 @@ function mapApplicationError(error, correlationId) {
       correlationId,
       details: error.details
     }),
-    headers: {}
+    headers: challengeHeaders(error.category)
   }
 }
 

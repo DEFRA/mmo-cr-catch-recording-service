@@ -1,4 +1,4 @@
-import { authenticationRequiredError } from '#/catch-recording/controller/authentication-errors.js'
+import { entraAuthenticationError } from './authentication-error.js'
 import { createAuthenticatedUserContext } from './authenticated-user-context.js'
 
 /**
@@ -19,11 +19,7 @@ export function entraAuthenticationScheme(_server, options) {
   const { validator, userIdClaim } = options
 
   const reject = (h, reason) =>
-    h.unauthenticated(
-      authenticationRequiredError(
-        new Error(`Entra authentication failed: ${reason}`)
-      )
-    )
+    h.unauthenticated(entraAuthenticationError(reason))
 
   return {
     authenticate: async (request, h) => {

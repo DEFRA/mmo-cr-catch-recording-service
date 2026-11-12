@@ -453,3 +453,46 @@ Open items (not changed here because the step forbids new ownership or vessel ru
   a product decision (`grantedVesselIds` is already available through `getCapabilityDecision(request)`).
   Recommended before production.
 - `GET /v1/catch-records` (listing) is capability- and owner-scoped but not vessel-filtered, for the same reason.
+
+## Controlled HTTP outcomes (Step 12)
+
+Authentication and authorization failures reuse the existing error contract
+(`{ statusCode, code, message, correlationId? }`, produced by the central `error-mapping` boundary); no new
+format, category or header scheme is introduced. The detailed reason is never public.
+
+| Public status | Code                      | Meaning                                                                                        | Internal outcomes                                                                                                                                                                                                                                                                |
+| ------------- | ------------------------- | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `401`         | `AUTHENTICATION_REQUIRED` | Authentication is required or the credentials are invalid. Carries `WWW-Authenticate: Bearer`. | missing, empty or malformed header, unsupported scheme, malformed JWT, disallowed algorithm, missing or invalid `kid`, unknown signing key, bad signature, wrong issuer or audience, expired, not yet valid, missing or malformed identity claim, signing-key source unavailable |
+| `403`         | `ACCESS_DENIED`           | Authenticated, but not permitted. One indistinguishable response.                              | unknown user, no roles, capability not granted, all assigned roles unknown, unknown capability, no role for that vessel                                                                                                                                                          |
+| `503`         | `DEPENDENCY_UNAVAILABLE`  | Authorization information is temporarily unavailable. No challenge, no `Retry-After`.          | user-role data unavailable or invalid, role definitions absent, over-stale, unavailable or invalid, cancellation, authorizer unavailable                                                                                                                                         |
+| `500`         | `INTERNAL_SERVER_ERROR`   | Unexpected defect or wiring failure (untrusted context, missing capability mapping).           | unchanged generic path                                                                                                                                                                                                                                                           |
+
+```json
+{
+  "statusCode": 403,
+  "code": "ACCESS_DENIED",
+  "message": "You do not have permission to perform this operation.",
+  "correlationId": "<trace id>"
+}
+```
+
+- **Permission denial vs dependency failure.** A valid denial is `403`; authorization data that cannot be
+  evaluated is `503` and never a `403` or `401`. Permitted stale role definitions are used normally (no
+  public difference).
+- **Signing-key outage.** The approved design does not distinguish an Entra metadata/JWKS outage publicly, so
+  a token that cannot be validated because its signing key is unobtainable is the generic `401` (fail
+  closed). This is a known trade-off: during an Entra metadata outage callers with a valid token whose key is
+  not yet cached receive `401`. Monitoring (Step 13) must surface it.
+- **Challenge.** Only `401` carries `WWW-Authenticate: Bearer` - no realm, `error` or `error_description` -
+  so nothing about the failure is revealed. `403` and `503` carry none.
+- **Correlation.** The existing correlation id (`x-cdp-request-id`, via `@defra/hapi-tracing`) is included in
+  the body when present and in the safe log; it is never used as identity or permission evidence.
+- **Cache-control.** Failures use the framework's existing `cache-control: no-cache`; no new header is
+  invented.
+- **Resource masking preserved.** Capability denial happens before any lookup, so it is `403` without
+  probing existence; a record that is not the caller's remains the existing masked `404`.
+- **Domain and input outcomes preserved.** `400`, `404`, `409`, `422` and `500` mappings are unchanged and are
+  never reclassified as `403`/`503`.
+- **Logging.** One `access-response` warning per `401`/`403`/`503` with only the bounded category, status,
+  internal reason constant and correlation id - never tokens, headers, claims, identifiers, roles,
+  capability maps or response bodies. Broader telemetry is Step 13.

@@ -55,6 +55,29 @@ describe('#mapErrorToResponse', () => {
       }
     )
 
+    test('Should add a generic Bearer challenge to authentication failures only', () => {
+      const challenged = mapErrorToResponse(
+        new ApplicationError({
+          category: 'AUTHENTICATION_FAILURE',
+          message: 'Safe'
+        }),
+        undefined
+      )
+
+      expect(challenged.headers).toEqual({ 'WWW-Authenticate': 'Bearer' })
+      for (const category of [
+        'AUTHORISATION_FAILURE',
+        'DEPENDENCY_UNAVAILABLE',
+        'RESOURCE_NOT_FOUND'
+      ]) {
+        const result = mapErrorToResponse(
+          new ApplicationError({ category, message: 'Safe' }),
+          undefined
+        )
+        expect(result.headers).toEqual({})
+      }
+    })
+
     test('Should preserve a specific stable code over the fallback code', () => {
       const error = new ApplicationError({
         category: 'RESOURCE_NOT_FOUND',
