@@ -367,6 +367,8 @@ export const config = convict({
 
 config.validate({ allowed: 'strict' })
 
-validateEntraAuthorizationConfig(config.get(), {
-  isLocalRuntime: config.get('cdpEnvironment') === 'local' && !isProduction
-})
+// Local development is the only runtime allowed to run without, or with http, Entra/authorization URLs
+export const isLocalRuntime =
+  config.get('cdpEnvironment') === 'local' && !isProduction
+
+validateEntraAuthorizationConfig(config.get(), { isLocalRuntime })

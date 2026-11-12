@@ -2,11 +2,12 @@ import Hapi from '@hapi/hapi'
 
 import { secureContext } from '@defra/hapi-secure-context'
 
-import { config } from '#/config.js'
+import { config, isLocalRuntime } from '#/config.js'
 import { router } from '#/plugins/router.js'
 import { requestLogger } from '#/plugins/request-logger.js'
 import { mongoDb } from '#/plugins/mongodb.js'
 import { errorMapping } from '#/plugins/error-mapping.js'
+import { entraSigningKeys } from '#/plugins/entra-signing-keys.js'
 import { authenticationPlugin } from '#/catch-recording/controller/authentication-plugin.js'
 import { referenceDataPlugin } from '#/catch-recording/controller/reference-data-plugin.js'
 import { catchArtifactPlugin } from '#/catch-recording/controller/catch-artifact-plugin.js'
@@ -49,6 +50,8 @@ export async function createServer() {
   // pulse               - provides shutdown handlers
   // mongoDb             - sets up mongo connection pool and attaches to `server` and `request` objects
   // errorMapping        - central onPreResponse boundary mapping errors to the safe public HTTP contract
+  // entraSigningKeys    - decorates `server.entraSigningKeyProvider`, the shared lazily-loaded Entra OIDC
+  //                       metadata/JWKS signing-key provider (not yet used to validate tokens)
   // authenticationPlugin - registers the trusted `authentication-service` Hapi auth scheme/strategy
   //                        (Step 13); dormant until a route opts in via `auth: 'authentication-service'`
   // referenceDataPlugin  - decorates `request.referenceDataClient` with the Step 15 Reference Data
@@ -67,6 +70,10 @@ export async function createServer() {
       options: config.get('mongo')
     },
     errorMapping,
+    {
+      plugin: entraSigningKeys,
+      options: { entra: config.get('entra'), allowHttp: isLocalRuntime }
+    },
     {
       plugin: authenticationPlugin,
       options: {
