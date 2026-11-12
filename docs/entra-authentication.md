@@ -160,3 +160,49 @@ It supports exactly two reads and nothing else (no arbitrary-path client):
   body, role or token is logged.
 - **Not done here:** semantic validation of the bodies (Step 06), caching (Steps 07-08), capability
   decisions (Step 09).
+
+## Authorization response validation (Step 06)
+
+Code: `src/authorization/authorization-response-validator.js`. It turns an untrusted Step 05 transport
+result into an immutable internal model, or a typed failure. Nothing is cached, retried or decided here.
+
+- `validateUserRolesResult(transportResult, trustedUser)` -> `{ userId, definitionsVersion, roleIds }`
+- `validateRoleDefinitionsResult(transportResult, serviceId)` -> `{ serviceId, definitionsVersion,
+updatedAt, roles: [{ roleId, capabilityIds }] }`
+
+Results are `{ ok: true, value }`, `{ ok: false, source: 'dependency', outcome, status }` (a Step 05
+transport failure, passed through untouched - validation never pretends to have happened) or
+`{ ok: false, source: 'validation', reason }`. A model exists only after complete validation, is deeply
+frozen, and copies nothing from the transport object (extra fields are ignored, not retained).
+
+Validated (the first problem rejects the whole response; nothing is coerced, trimmed, de-duplicated or
+silently dropped):
+
+- `schemaVersion`: string, exactly in the allow-list `['1.0']` (no newer or numeric version).
+- User roles: `userId` must equal the trusted requested identifier exactly (case-sensitive); `roles` is a
+  unique array of valid identifiers. A response for another user is rejected.
+- Role definitions: `serviceId` must equal the configured `authorization.serviceId`; `roles` is a
+  non-empty array of `{ roleId, capabilityIds }` with unique role ids and unique capability ids per role.
+- `definitionsVersion`: required string, up to 64 characters of `A-Za-z0-9._-`, starting alphanumeric.
+- `updatedAt`: optional; when present a strict UTC instant (`...Z`, real calendar date), normalised to ISO.
+  It is metadata only and is never used for local cache timing.
+- Identifiers (roles, capabilities): up to 128 characters of `A-Za-z0-9._:-`, starting alphanumeric - this
+  accepts values such as `VRO5--Owner` and `catch-record.read` while rejecting whitespace, control
+  characters, separators and wildcards. The capability catalogue is not hard-coded here.
+- Bounds: 1000 user roles, 200 role definitions, 100 capabilities per role, 2000 role-capability
+  associations in total.
+
+Decisions recorded:
+
+- **Unknown user / no roles.** The approved contract returns `200` with `roles: []` for an unknown user, so
+  that is a valid outcome with an empty `roleIds` (no default role, never unrestricted). A transport
+  `404` is **not** treated as an unknown user: it stays a dependency failure.
+- **Empty role definitions.** Design 7.3 says an empty set grants nothing; design 8.8 says an unexpectedly
+  empty body must never replace a valid cache. The conservative reconciliation: an empty `roles`
+  collection is rejected as `EMPTY_ROLE_DEFINITIONS` (never usable), so it can neither replace a snapshot
+  nor be mistaken for allow-all. A role with an empty `capabilityIds` list is valid and grants nothing.
+- Limits are conservative initial values (the design defines none); user roles are bounded generously
+  because they can be vessel-scoped.
+
+Open item for Step 09: the design's examples show assigned roles such as `VRO5--Owner` while definitions
+list `Owner`; how an assigned role id is matched to a definition is a Step 09 concern and is resolved there.
