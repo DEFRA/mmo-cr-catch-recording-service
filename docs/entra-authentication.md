@@ -121,3 +121,42 @@ request with the generic `401 AUTHENTICATION_REQUIRED`; a failed request has no 
 - **Transition.** The legacy strategy is unchanged and no route uses `entra-bearer` yet; there is no
   fallback from a failed Entra authentication to a mock identity. Step 05 will use `userId` to build the
   user-roles request; roles, caching and capabilities are not part of this step.
+
+## User Profile Service client (Step 05)
+
+Code: `src/authorization/user-profile-client.js`; registered once by the `userProfile` plugin
+(`src/plugins/user-profile-client.js`) as `server.userProfileClient` (`null` only when authorization is
+entirely unconfigured in local development). It is not yet used by any request path.
+
+It supports exactly two reads and nothing else (no arbitrary-path client):
+
+| Operation                  | Request                      | Source of the variable part                                                      |
+| -------------------------- | ---------------------------- | -------------------------------------------------------------------------------- |
+| `getUserRoles(user, opts)` | `GET {userRolesUrlTemplate}` | `user.userId` from the trusted Step 04 context, as one encoded path segment      |
+| `getRoleDefinitions(opts)` | `GET {roleDefinitionsUrl}`   | the validated configuration (its path already carries `authorization.serviceId`) |
+
+- **Trusted identity only.** `getUserRoles` accepts only a context created by Step 04; any other value
+  (including a look-alike object or a string) is refused before a request is built. Path, query, body and
+  header values can never replace the origin or the identifier.
+- **No credentials.** Only `Accept: application/json` and the correlation header are sent. The incoming
+  Entra access token is never forwarded; there is no API key, secret, managed identity, mTLS or signed
+  request. The current User Profile Service is an unauthenticated mock; **production service-to-service
+  authentication remains a deferred production requirement**.
+- **Correlation.** The caller-supplied correlation id is sent in the configured tracing header
+  (`tracing.header`, `x-cdp-request-id`) only if it is a safe token (1-128 of `A-Za-z0-9._-`).
+- **Timeout / cancellation.** `authorization.userProfileRequestTimeoutMs` bounds every attempt; a caller
+  `AbortSignal` is honoured independently, so `TIMEOUT` and `CANCELLED` are distinct outcomes.
+- **Retry.** The repository's existing approved policy: only HTTP `502`/`503`/`504`, at most
+  `authorization.userProfileRetryCount` retries, `authorization.userProfileRetryDelayMs` apart. Timeouts,
+  other statuses and invalid content are never retried, so total time stays bounded.
+- **Response handling.** `200` with a JSON content type and a body of at most 256 KiB yields
+  `{ ok: true, body }` where `body` is the parsed, deeply frozen, **untrusted** JSON. Otherwise
+  `{ ok: false, outcome, status }` with one of `NOT_FOUND`, `CLIENT_ERROR`, `RATE_LIMITED`,
+  `SERVER_ERROR`, `UNAVAILABLE`, `UNEXPECTED_STATUS`, `UNEXPECTED_CONTENT_TYPE`, `INVALID_JSON`,
+  `TIMEOUT`, `CANCELLED`, `TRANSPORT_FAILURE`, `INTERNAL_ERROR`. These are transport facts, not
+  authorisation decisions (a `404` is not a `403`; nothing grants access) and are not mapped to HTTP
+  statuses here. Redirects are never followed.
+- **Logging.** Safe fields only (operation, outcome, status, duration, attempt). No user identifier, URL,
+  body, role or token is logged.
+- **Not done here:** semantic validation of the bodies (Step 06), caching (Steps 07-08), capability
+  decisions (Step 09).

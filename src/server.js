@@ -9,6 +9,7 @@ import { mongoDb } from '#/plugins/mongodb.js'
 import { errorMapping } from '#/plugins/error-mapping.js'
 import { entraSigningKeys } from '#/plugins/entra-signing-keys.js'
 import { entraAuthentication } from '#/plugins/entra-authentication.js'
+import { userProfile } from '#/plugins/user-profile-client.js'
 import { authenticationPlugin } from '#/catch-recording/controller/authentication-plugin.js'
 import { referenceDataPlugin } from '#/catch-recording/controller/reference-data-plugin.js'
 import { catchArtifactPlugin } from '#/catch-recording/controller/catch-artifact-plugin.js'
@@ -55,6 +56,8 @@ export async function createServer() {
   //                       metadata/JWKS signing-key provider (not yet used to validate tokens)
   // entraAuthentication - registers the `entra-bearer` Hapi auth strategy (local Entra access-token
   //                       validation); dormant until a route opts in
+  // userProfile         - decorates `server.userProfileClient`, the shared User Profile Service transport
+  //                       client (user roles and role definitions); not yet used by any request path
   // authenticationPlugin - registers the trusted `authentication-service` Hapi auth scheme/strategy
   //                        (Step 13); dormant until a route opts in via `auth: 'authentication-service'`
   // referenceDataPlugin  - decorates `request.referenceDataClient` with the Step 15 Reference Data
@@ -80,6 +83,13 @@ export async function createServer() {
     {
       plugin: entraAuthentication,
       options: { entra: config.get('entra') }
+    },
+    {
+      plugin: userProfile,
+      options: {
+        ...config.get('authorization'),
+        tracingHeader: config.get('tracing.header')
+      }
     },
     {
       plugin: authenticationPlugin,

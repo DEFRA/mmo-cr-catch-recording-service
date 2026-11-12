@@ -59,6 +59,16 @@ export function createAuthenticatedUserContext(validatedClaims, userIdClaim) {
 }
 
 /**
+ * True only for a context created by {@link createAuthenticatedUserContext}.
+ *
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+export function isAuthenticatedUserContext(value) {
+  return trustedContexts.has(value)
+}
+
+/**
  * The single narrow accessor for the trusted caller of a request. Returns the context only when the
  * request was authenticated by the Entra strategy with a context built by this module, otherwise `null`.
  * Never reads a body, query, route parameter, header or cookie.
@@ -71,7 +81,7 @@ export function getAuthenticatedUser(request) {
 
   return auth?.isAuthenticated &&
     auth.strategy === ENTRA_AUTH_STRATEGY &&
-    trustedContexts.has(auth.credentials)
+    isAuthenticatedUserContext(auth.credentials)
     ? auth.credentials
     : null
 }

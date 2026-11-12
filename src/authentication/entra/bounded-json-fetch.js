@@ -1,43 +1,11 @@
+import {
+  readBoundedText,
+  ResponseBodyTooLargeError
+} from '#/common/helpers/http/read-bounded-text.js'
 import { SigningKeyError, SigningKeyFailure } from './signing-key-failure.js'
 
-const BODY_TOO_LARGE = 'BODY_TOO_LARGE'
 const HTTP_STATUS_OK_MIN = 200
 const HTTP_STATUS_OK_MAX = 299
-
-async function readBoundedText(response, maxBytes) {
-  const declaredLength = Number(response.headers?.get?.('content-length'))
-  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
-    throw new SigningKeyError(BODY_TOO_LARGE)
-  }
-
-  if (!response.body?.getReader) {
-    const text = await response.text()
-    if (Buffer.byteLength(text) > maxBytes) {
-      throw new SigningKeyError(BODY_TOO_LARGE)
-    }
-    return text
-  }
-
-  const reader = response.body.getReader()
-  const decoder = new TextDecoder()
-  let received = 0
-  let text = ''
-
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) {
-      break
-    }
-    received += value.byteLength
-    if (received > maxBytes) {
-      await reader.cancel()
-      throw new SigningKeyError(BODY_TOO_LARGE)
-    }
-    text += decoder.decode(value, { stream: true })
-  }
-
-  return text + decoder.decode()
-}
 
 /**
  * Retrieves and parses one JSON document with a bounded timeout and bounded body size. Redirects are
@@ -96,9 +64,10 @@ function toSigningKeyError(
   { controller, unavailableReason, invalidReason }
 ) {
   if (cause instanceof SigningKeyError) {
-    return cause.reason === BODY_TOO_LARGE
-      ? new SigningKeyError(invalidReason)
-      : cause
+    return cause
+  }
+  if (cause instanceof ResponseBodyTooLargeError) {
+    return new SigningKeyError(invalidReason)
   }
   if (controller.signal.aborted) {
     return new SigningKeyError(SigningKeyFailure.REQUEST_TIMEOUT)
