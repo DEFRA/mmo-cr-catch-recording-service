@@ -2,6 +2,7 @@ import { isAuthenticatedUserContext } from '#/authentication/entra/authenticated
 import { isValidIdentifier } from './authorization-response-validator.js'
 import { UserProfileOutcome } from './user-profile-client.js'
 import { SnapshotState } from './role-definitions-cache.js'
+import { parseVesselScopedRole } from './vessel-scoped-role.js'
 
 export const AuthorizationOutcome = Object.freeze({
   ALLOWED: 'allowed',
@@ -50,6 +51,14 @@ export function createRequiredCapability(capabilityId) {
   const capability = Object.freeze({ capabilityId })
   issuedCapabilities.add(capability)
   return capability
+}
+
+/**
+ * @param {unknown} value
+ * @returns {boolean} true only for a value created by {@link createRequiredCapability}
+ */
+export function isRequiredCapability(value) {
+  return issuedCapabilities.has(value)
 }
 
 // Derived, immutable lookup tables, memoised per frozen snapshot and released with it
@@ -126,6 +135,10 @@ function unavailableForDefinitions(failure) {
  * Evaluates the approved any-role-grants rule for one required capability. Stateless: it holds no
  * authorization data of its own and consumes only the Step 07 and Step 08 cache contracts.
  *
+ * Assigned roles have the form `[vessel]--[role]` (for example `VRO5--Owner`): the role part is looked up
+ * in the role definitions and its capabilities apply to that vessel only. A role that is not of that form
+ * is unrecognised and grants nothing.
+ *
  * Decision order (deterministic):
  *  1. no trusted user context, or an invalid required capability -> unavailable (fail closed);
  *  2. user-role data unavailable (incl. expired + failed refresh, invalid data, cancellation) -> unavailable;
@@ -133,7 +146,9 @@ function unavailableForDefinitions(failure) {
  *  4. role definitions unavailable (incl. over-stale, absent + failed load) -> unavailable;
  *  5. required capability absent from every current definition -> denied;
  *  6. no known assigned role grants the exact capability -> denied;
- *  7. at least one known assigned role grants it -> allowed (unknown roles grant nothing and never block).
+ *  7. at least one known assigned role grants it -> allowed, listing the vessels it was granted for (when
+ *     a vessel is supplied only a role assigned for that exact vessel counts; unknown roles grant nothing
+ *     and never block).
  *
  * @param {Object} options
  * @param {{ getUserRoles: Function }} options.userRoleCache Step 07
@@ -145,7 +160,7 @@ export function createCapabilityAuthorizer({
   roleDefinitionsCache,
   logger
 }) {
-  function evaluate(roleIds, snapshot, capabilityId, context) {
+  function evaluate(roleIds, snapshot, { capabilityId, vesselId }, context) {
     const { capabilitiesByRole, knownCapabilities } = indexOf(snapshot)
     const base = {
       capability: capabilityId,
@@ -161,18 +176,32 @@ export function createCapabilityAuthorizer({
       })
     }
 
+    // Assigned roles are `[vessel]--[role]`: the role's capabilities apply to that vessel only
     let unknownRoleCount = 0
-    for (const roleId of roleIds) {
-      const capabilities = capabilitiesByRole.get(roleId)
+    const grantingVesselIds = new Set()
+    for (const assignedRoleId of roleIds) {
+      const scoped = parseVesselScopedRole(assignedRoleId)
+      const capabilities = scoped && capabilitiesByRole.get(scoped.roleId)
       if (!capabilities) {
         unknownRoleCount += 1
       } else if (capabilities.has(capabilityId)) {
-        return Object.freeze({
-          outcome: AuthorizationOutcome.ALLOWED,
-          ...base,
-          unknownRoleCount
-        })
+        grantingVesselIds.add(scoped.vesselId)
       }
+    }
+
+    const granted =
+      vesselId === undefined
+        ? grantingVesselIds.size > 0
+        : grantingVesselIds.has(vesselId)
+    if (granted) {
+      return Object.freeze({
+        outcome: AuthorizationOutcome.ALLOWED,
+        ...base,
+        grantedVesselIds: Object.freeze(
+          vesselId === undefined ? [...grantingVesselIds] : [vesselId]
+        ),
+        unknownRoleCount
+      })
     }
 
     return Object.freeze({
@@ -186,11 +215,14 @@ export function createCapabilityAuthorizer({
     })
   }
 
-  async function decide(user, capability, { correlationId, signal }) {
+  async function decide(user, capability, { vesselId, correlationId, signal }) {
     if (!isAuthenticatedUserContext(user)) {
       return unavailable(UnavailableReason.UNTRUSTED_USER_CONTEXT)
     }
-    if (!issuedCapabilities.has(capability)) {
+    if (
+      !issuedCapabilities.has(capability) ||
+      (vesselId !== undefined && !isValidIdentifier(vesselId))
+    ) {
       return unavailable(UnavailableReason.INVALID_REQUIRED_CAPABILITY)
     }
 
@@ -224,7 +256,7 @@ export function createCapabilityAuthorizer({
     return evaluate(
       userRoles.value.roleIds,
       definitions.snapshot,
-      capabilityId,
+      { capabilityId, vesselId },
       {
         userRoleCacheState,
         roleDefinitionsCacheState: definitions.cacheState,
@@ -236,13 +268,23 @@ export function createCapabilityAuthorizer({
   /**
    * @param {Readonly<{ userId: string }>} user the trusted Step 04 authenticated-user context
    * @param {Readonly<{ capabilityId: string }>} capability from `createRequiredCapability`
-   * @param {{ correlationId?: string, signal?: AbortSignal }} [options]
+   * @param {{ vesselId?: string, correlationId?: string, signal?: AbortSignal }} [options] `vesselId`
+   *   restricts the check to roles assigned for that exact vessel; without it any vessel suffices and the
+   *   allowed decision lists the vessels (`grantedVesselIds`) for resource-level composition
    * @returns {Promise<Readonly<{ outcome: 'allowed' | 'denied' | 'unavailable', reason?: string }>>}
    */
-  async function authorize(user, capability, { correlationId, signal } = {}) {
+  async function authorize(
+    user,
+    capability,
+    { vesselId, correlationId, signal } = {}
+  ) {
     let decision
     try {
-      decision = await decide(user, capability, { correlationId, signal })
+      decision = await decide(user, capability, {
+        vesselId,
+        correlationId,
+        signal
+      })
     } catch {
       decision = unavailable(UnavailableReason.INTERNAL_FAILURE)
     }

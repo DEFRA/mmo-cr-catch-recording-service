@@ -341,3 +341,60 @@ Open item to confirm before production: the design's examples show assigned role
 alongside definitions named `Owner`. The approved rule (design 8.9) is an exact lookup of each assigned role
 id in the definitions, and no name inference or alias handling is added, so assigned role ids must equal
 definition `roleId`s.
+
+## Endpoint-to-capability mapping (Step 10)
+
+Code: `src/authorization/capabilities.js` (catalogue), `protected-route.js` (`protectedRoute`),
+`authorization-errors.js`, and the `capabilityEnforcement` plugin (`src/plugins/capability-enforcement.js`).
+
+**Catalogue** - exactly five exact, case-sensitive capabilities, created once with `createRequiredCapability`:
+`catch-record.read`, `catch-record.create`, `catch-record.update`, `catch-record.submit`, `catch-record.amend`.
+No aliases, wildcards or role-named capabilities. Grants are owned by the User Profile Service role
+definitions; this service hard-codes no role-to-capability grant.
+
+**Role form and vessel scope.** Assigned roles have the form `[vessel]--[role]` (for example `VRO5--Owner`).
+`parseVesselScopedRole` splits on exactly one `--`; the role part is looked up in the definitions and its
+capabilities apply to that vessel only. A role not of that form is unrecognised and grants nothing. The
+engine accepts an optional `vesselId` (only a role assigned for that exact vessel counts) and an allowed
+decision lists `grantedVesselIds`.
+
+**Mechanism.** A route declares `...protectedRoute({ capability, vesselIdParam? })`, which sets the Entra
+`entra-bearer` strategy and route metadata. The `capabilityEnforcement` plugin runs once at `onPostAuth` -
+after authentication, before payload validation and the handler - so a denied or unavailable decision stops
+the request before any protected side effect. The caller is only the trusted authenticated-user context; the
+capability comes only from route metadata, never request data.
+
+| Operation                    | Route(s)                                                                                                                      | Capability                            |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| Read                         | `GET /v1/catch-records`, `GET .../{id}`, `GET .../{id}/history`, `GET .../{id}/submissions`, `GET .../submissions/{n}/{type}` | `catch-record.read`                   |
+| Create                       | `POST /v1/catch-records`                                                                                                      | `catch-record.create`                 |
+| Update / save and continue   | `PUT`, `PATCH`, `DELETE` (abandon draft) `/v1/catch-records/{id}`                                                             | `catch-record.update`                 |
+| Submit                       | `POST .../{id}/submission`                                                                                                    | `catch-record.submit`                 |
+| Amend                        | `POST .../{id}/edit-start`                                                                                                    | `catch-record.amend`                  |
+| Vessel favourites / skippers | `GET /v1/vessels/{vesselId}/favourite-*`, `.../skippers`                                                                      | `catch-record.read` for that vessel   |
+|                              | `POST`/`DELETE` on the same                                                                                                   | `catch-record.update` for that vessel |
+
+Mapping notes: abandon is mapped to `update` because it is the only approved capability that fits an
+operation on an editable draft (a mapping by elimination, no capability was invented); amendment saves reuse
+`PATCH` and so need `update`, resubmission reuses the submission route and needs `submit`.
+
+**Fail closed.** The server refuses to start, and each request fails closed with `500`, for any authenticated
+route without a catalogue capability, with a different strategy, or whose `vesselIdParam` is not in its path.
+Public routes (`auth: false`/default) are untouched. An unconfigured authorizer yields `503`. A capability
+unknown to the current role definitions is denied by the engine.
+
+**Outcomes (existing categories, no new ones).** Denied -> `403 ACCESS_DENIED`; authorization data
+unavailable -> `503 DEPENDENCY_UNAVAILABLE`; internal wiring failure -> `500`. The reason is kept in the
+error's internal `meta` only. Final public response shaping and the `WWW-Authenticate` challenge are Step 12.
+
+**Resource and domain checks are unchanged** (ownership, vessel access, lifecycle, versions) and remain in the
+handlers; Step 11 composes them explicitly. The legacy `authentication-service` strategy remains registered
+but no route uses it; its removal is Step 14.
+
+**Completion removed.** `POST /v1/catch-records/{id}/completion` was deprecated and removed on the product
+owner's instruction (route, controller, scope-based `completion-policy.js`, OpenAPI path and docs). The
+`applyCompletion`/`findCatchRecordById` persistence primitives remain with no caller.
+
+**Vessel routes.** Vessel favourites and skippers were mapped to read/update because assigned roles are
+vessel-scoped (`[vessel]--[role]`), on the product owner's guidance; confirm this is the intended
+semantics before production.

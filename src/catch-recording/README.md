@@ -25,7 +25,7 @@ responsibilities, exclusions, and the approved dependency direction.
   contracts; an atomic first-claim operation backed solely by a MongoDB unique index; and a scoped
   completion operation storing only a minimal allow-listed replay result) — targeted at exactly the seven
   operations approved by the detailed plan §5.2 (draft creation, submission, edit start, resubmission, add
-  favourite, add skipper, completion), explicitly **excluding** ordinary section PATCH operations, which
+  favourite, add skipper, completion - the completion endpoint itself has since been removed), explicitly **excluding** ordinary section PATCH operations, which
   continue to rely solely on Step 11's optimistic concurrency. See
   [`docs/catch-recording-persistence.md`](../../docs/catch-recording-persistence.md). Does not implement
   any business endpoint/operation, idempotency retention/TTL, routes, the HTTP transport representation for
@@ -34,9 +34,9 @@ responsibilities, exclusions, and the approved dependency direction.
   framework-neutral `{ userId, scopes }` context mapper, and a dormant Hapi `authentication-service` auth
   scheme/plugin (no route is enforced yet). See
   [`docs/catch-recording-authentication.md`](../../docs/catch-recording-authentication.md).
-- `security/` — the Step 14 resource-authorisation policies: ten explicit, default-deny, framework-neutral
+- `security/` — the Step 14 resource-authorisation policies: nine explicit, default-deny, framework-neutral
   policies (vessel access, Catch Record ownership, read, draft-update, draft-abandonment, submission,
-  amendment, artifact access, vessel-profile access, restricted completion), one shared policy-outcome
+  amendment, artifact access, vessel-profile access), one shared policy-outcome
   contract, and one error-enforcement helper reusing the existing Step 03 error categories. See
   [`docs/catch-recording-authorisation.md`](../../docs/catch-recording-authorisation.md).
 - `reference-data/` — the Step 15 Reference Data Service client (five explicit, read-only resource

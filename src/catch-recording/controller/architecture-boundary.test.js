@@ -11,7 +11,6 @@ const FRAMEWORK_NEUTRAL_FILES = [
   'submit-catch-record.js',
   'list-submission-artifacts.js',
   'retrieve-submission-artifact.js',
-  'complete-catch-record.js',
   'start-catch-record-edit.js',
   'vessel-profile-access.js',
   'vessel-favourites.js',

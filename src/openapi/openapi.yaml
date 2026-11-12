@@ -6,7 +6,7 @@ info:
   description: >-
     The JSON API exposed by the MMO Catch Recording Catch Recording Service to other Catch Recording
     client services. Describes the Catch Record lifecycle (draft creation, section saves, complete
-    replacement, submission, completion, edit-start, abandonment), queries (listing, retrieval,
+    replacement, submission, edit-start, abandonment), queries (listing, retrieval,
     history, submission artifacts), vessel favourites and vessel-owned skippers, and the platform
     health check.
 
@@ -374,36 +374,6 @@ paths:
           description: >-
             The Catch Record does not exist for this owner, or no committed artifact exists for the
             requested submission number and type.
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/ErrorResponse" }
-
-  /v1/catch-records/{catchRecordId}/completion:
-    post:
-      operationId: completeCatchRecord
-      tags: [Catch Records]
-      summary: Restricted-permission transition SUBMITTED → COMPLETE
-      description: >-
-        Requires an authenticated caller whose trusted scopes include `catch-recording.complete`.
-        Requires `If-Match`. Safe to replay with the same `Idempotency-Key`.
-      parameters:
-        - $ref: "#/components/parameters/CatchRecordIdPath"
-        - $ref: "#/components/parameters/IfMatchHeader"
-        - $ref: "#/components/parameters/IdempotencyKeyHeader"
-      responses:
-        "200":
-          description: The completion response.
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/CompletionResponse" }
-        "400": { $ref: "#/components/responses/BadRequestError" }
-        "401": { $ref: "#/components/responses/UnauthorizedError" }
-        "403": { $ref: "#/components/responses/ForbiddenError" }
-        "404": { $ref: "#/components/responses/NotFoundError" }
-        "409":
-          description: >-
-            The supplied `If-Match` no longer matches the record's current `version`, the record is
-            not `SUBMITTED`, or the same `Idempotency-Key` was already used with a different request.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
@@ -1073,15 +1043,6 @@ components:
             artifacts:
               type: array
               items: { $ref: "#/components/schemas/ArtifactMetadata" }
-
-    CompletionResponse:
-      allOf:
-        - $ref: "#/components/schemas/StandardSaveResponse"
-        - type: object
-          required: [completedAt, completedBy]
-          properties:
-            completedAt: { type: string, format: date-time }
-            completedBy: { type: string }
 
     RetrieveCatchRecordResponse:
       allOf:

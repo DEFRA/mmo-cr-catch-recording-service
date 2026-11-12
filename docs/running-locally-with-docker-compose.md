@@ -309,13 +309,6 @@ curl -i "$CR_URL/v1/catch-records/$CATCH_RECORD_ID/submissions/1/pdf" \
   -H "Authorization: $TOKEN" \
   -o receipt.pdf
 
-# Restricted-permission transition SUBMITTED -> COMPLETE. Requires a caller whose authenticated
-# permissions include catch-recording.complete. Requires If-Match; Idempotency-Key is optional.
-curl -i -X POST "$CR_URL/v1/catch-records/$CATCH_RECORD_ID/completion" \
-  -H "Authorization: $TOKEN" \
-  -H "If-Match: $VERSION" \
-  -H "Idempotency-Key: $(uuidgen)"
-
 # Start an in-place amendment (SUBMITTED/COMPLETE -> DRAFT). Requires If-Match; Idempotency-Key is
 # optional. Amendment saves reuse the PATCH route above; resubmission reuses the POST .../submission
 # route above.

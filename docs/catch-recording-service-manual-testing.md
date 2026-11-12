@@ -423,18 +423,7 @@ curl -fSsL \
 file "catch-record-$CATCH_RECORD_ID-submission-$SUBMISSION_NUMBER.pdf"
 ```
 
-### 4.14 Complete the Catch Record
-
-This is a restricted-permission transition from `SUBMITTED` to `COMPLETE`.
-
-```bash
-curl -i -sS -X POST "$BASE_URL/v1/catch-records/$CATCH_RECORD_ID/completion" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "If-Match: $VERSION" \
-  -H "Idempotency-Key: complete-catch-record-001"
-```
-
-### 4.15 Start an amendment
+### 4.14 Start an amendment
 
 This transitions a `SUBMITTED` or `COMPLETE` record back to `DRAFT` for in-place editing.
 

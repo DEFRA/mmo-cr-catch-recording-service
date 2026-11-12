@@ -468,6 +468,11 @@ production traffic yet, documented here as decisions rather than invented silent
 
 ### Step 36: restricted completion
 
+> **Removed.** The `POST /v1/catch-records/{catchRecordId}/completion` endpoint, its controller and its
+> scope-based `completion-policy.js` were removed as deprecated (Entra Step 10, on the product owner's
+> instruction). The decisions below are retained only as history; `applyCompletion` and
+> `findCatchRecordById` remain in the persistence layer with no caller.
+
 - **Completion permission**: already resolved before Phase 8 — the exact `catch-recording.complete`
   scope (`completion-policy.js`, confirmed in `docs/catch-recording-authorisation.md`'s Phase 4
   decisions). No new permission name is invented.

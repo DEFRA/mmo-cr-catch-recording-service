@@ -55,7 +55,7 @@ const dependencyFailure = (outcome) => ({
 
 function createHarness({ roles, definitions } = {}) {
   const userRoleCache = {
-    getUserRoles: vi.fn(async () => roles ?? rolesResult(['Owner']))
+    getUserRoles: vi.fn(async () => roles ?? rolesResult(['VRO5--Owner']))
   }
   const roleDefinitionsCache = {
     getRoleDefinitions: vi.fn(async () => definitions ?? definitionsResult())
@@ -98,7 +98,9 @@ describe('#createRequiredCapability', () => {
 describe('#createCapabilityAuthorizer', () => {
   describe('any-role-grants', () => {
     test('Should allow when a single assigned role grants the exact capability', async () => {
-      const harness = createHarness({ roles: rolesResult(['ReadOnlyUser']) })
+      const harness = createHarness({
+        roles: rolesResult(['VRO5--ReadOnlyUser'])
+      })
 
       await expect(decide(harness, READ)).resolves.toMatchObject({
         outcome: AuthorizationOutcome.ALLOWED,
@@ -112,7 +114,9 @@ describe('#createCapabilityAuthorizer', () => {
     })
 
     test('Should deny when a known role does not grant the capability', async () => {
-      const harness = createHarness({ roles: rolesResult(['ReadOnlyUser']) })
+      const harness = createHarness({
+        roles: rolesResult(['VRO5--ReadOnlyUser'])
+      })
 
       await expect(decide(harness, CREATE)).resolves.toMatchObject({
         outcome: AuthorizationOutcome.DENIED,
@@ -122,9 +126,9 @@ describe('#createCapabilityAuthorizer', () => {
 
     test('Should allow when at least one of several roles grants it, whatever the order', async () => {
       for (const roles of [
-        ['ReadOnlyUser', 'Owner'],
-        ['Owner', 'ReadOnlyUser'],
-        ['Observer', 'ReadOnlyUser', 'Owner']
+        ['VRO5--ReadOnlyUser', 'VRO5--Owner'],
+        ['VRO5--Owner', 'VRO5--ReadOnlyUser'],
+        ['VRO5--Observer', 'VRO5--ReadOnlyUser', 'VRO5--Owner']
       ]) {
         const harness = createHarness({ roles: rolesResult(roles) })
         expect((await decide(harness, CREATE)).outcome).toBe(
@@ -135,7 +139,11 @@ describe('#createCapabilityAuthorizer', () => {
 
     test('Should not require every role to grant the capability', async () => {
       const harness = createHarness({
-        roles: rolesResult(['Observer', 'Owner', 'ReadOnlyUser'])
+        roles: rolesResult([
+          'VRO5--Observer',
+          'VRO5--Owner',
+          'VRO5--ReadOnlyUser'
+        ])
       })
 
       expect((await decide(harness, READ)).outcome).toBe(
@@ -151,7 +159,7 @@ describe('#createCapabilityAuthorizer', () => {
       'Should not let %s imply a different capability',
       async (granted, required) => {
         const harness = createHarness({
-          roles: rolesResult(['Narrow']),
+          roles: rolesResult(['VRO5--Narrow']),
           definitions: definitionsResult({
             snapshot: Object.freeze({
               ...DEFINITIONS,
@@ -183,7 +191,9 @@ describe('#createCapabilityAuthorizer', () => {
     ])(
       'Should use exact matching only and never prefix, suffix, case or similarity matches (%s)',
       async (required) => {
-        const harness = createHarness({ roles: rolesResult(['ReadOnlyUser']) })
+        const harness = createHarness({
+          roles: rolesResult(['VRO5--ReadOnlyUser'])
+        })
 
         expect(
           (await decide(harness, createRequiredCapability(required))).reason
@@ -193,7 +203,7 @@ describe('#createCapabilityAuthorizer', () => {
 
     test('Should not treat a wildcard-looking capability in the definitions as granting anything else', async () => {
       const harness = createHarness({
-        roles: rolesResult(['Wild']),
+        roles: rolesResult(['VRO5--Wild']),
         definitions: definitionsResult({
           snapshot: Object.freeze({
             ...DEFINITIONS,
@@ -216,7 +226,7 @@ describe('#createCapabilityAuthorizer', () => {
   describe('unknown roles, capabilities, users', () => {
     test('Should deny when every assigned role is unknown', async () => {
       const harness = createHarness({
-        roles: rolesResult(['Ghost', 'Phantom'])
+        roles: rolesResult(['VRO5--Ghost', 'VRO5--Phantom'])
       })
 
       await expect(decide(harness, READ)).resolves.toMatchObject({
@@ -227,7 +237,9 @@ describe('#createCapabilityAuthorizer', () => {
     })
 
     test('Should not let an unknown role block a grant from a known role', async () => {
-      const harness = createHarness({ roles: rolesResult(['Ghost', 'Owner']) })
+      const harness = createHarness({
+        roles: rolesResult(['VRO5--Ghost', 'VRO5--Owner'])
+      })
 
       await expect(decide(harness, READ)).resolves.toMatchObject({
         outcome: AuthorizationOutcome.ALLOWED,
@@ -236,7 +248,7 @@ describe('#createCapabilityAuthorizer', () => {
     })
 
     test('Should deny an unknown required capability even for a role that grants others', async () => {
-      const harness = createHarness({ roles: rolesResult(['Owner']) })
+      const harness = createHarness({ roles: rolesResult(['VRO5--Owner']) })
 
       await expect(
         decide(harness, createRequiredCapability('catch-record.amend'))
@@ -257,6 +269,93 @@ describe('#createCapabilityAuthorizer', () => {
       expect(
         harness.roleDefinitionsCache.getRoleDefinitions
       ).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('vessel-scoped roles', () => {
+    test('Should apply a role only to the vessel it is assigned for and list the granting vessels', async () => {
+      const harness = createHarness({
+        roles: rolesResult(['VRO5--Owner', 'PLDN--ReadOnlyUser', 'XYZ1--Owner'])
+      })
+
+      const create = await decide(harness, CREATE)
+      const read = await decide(harness, READ)
+
+      expect(create).toMatchObject({
+        outcome: AuthorizationOutcome.ALLOWED,
+        grantedVesselIds: ['VRO5', 'XYZ1']
+      })
+      expect(read.grantedVesselIds).toEqual(['VRO5', 'PLDN', 'XYZ1'])
+      expect(Object.isFrozen(create.grantedVesselIds)).toBe(true)
+    })
+
+    test('Should allow a capability for a vessel only when a role for that exact vessel grants it', async () => {
+      const harness = createHarness({
+        roles: rolesResult(['VRO5--Owner', 'PLDN--ReadOnlyUser'])
+      })
+
+      await expect(
+        decide(harness, CREATE, { vesselId: 'VRO5' })
+      ).resolves.toMatchObject({
+        outcome: AuthorizationOutcome.ALLOWED,
+        grantedVesselIds: ['VRO5']
+      })
+      await expect(
+        decide(harness, CREATE, { vesselId: 'PLDN' })
+      ).resolves.toMatchObject({
+        outcome: AuthorizationOutcome.DENIED,
+        reason: DenialReason.CAPABILITY_NOT_GRANTED
+      })
+      await expect(
+        decide(harness, READ, { vesselId: 'PLDN' })
+      ).resolves.toMatchObject({ outcome: AuthorizationOutcome.ALLOWED })
+    })
+
+    test.each([['vro5'], ['VRO5 '], [' VRO5'], ['VRO'], ['VRO55'], ['OTHER']])(
+      'Should not match the vessel %j by anything but exact equality',
+      async (vesselId) => {
+        const harness = createHarness({ roles: rolesResult(['VRO5--Owner']) })
+
+        const decision = await decide(harness, READ, { vesselId })
+
+        expect(decision.outcome).not.toBe(AuthorizationOutcome.ALLOWED)
+      }
+    )
+
+    test('Should fail closed for a malformed vessel id', async () => {
+      const harness = createHarness()
+
+      await expect(
+        decide(harness, READ, { vesselId: 'VRO5/../x' })
+      ).resolves.toMatchObject({
+        outcome: AuthorizationOutcome.UNAVAILABLE,
+        reason: UnavailableReason.INVALID_REQUIRED_CAPABILITY
+      })
+      expect(harness.userRoleCache.getUserRoles).not.toHaveBeenCalled()
+    })
+
+    test.each([['Owner'], ['VRO5--'], ['--Owner'], ['VRO5--Owner--Extra']])(
+      'Should treat the unscoped or malformed assigned role %j as unknown and grant nothing',
+      async (assigned) => {
+        const harness = createHarness({ roles: rolesResult([assigned]) })
+
+        await expect(decide(harness, READ)).resolves.toMatchObject({
+          outcome: AuthorizationOutcome.DENIED,
+          reason: DenialReason.ALL_ASSIGNED_ROLES_UNKNOWN
+        })
+      }
+    )
+
+    test('Should not let an unknown vessel role block a grant for another vessel', async () => {
+      const harness = createHarness({
+        roles: rolesResult(['VRO5--Ghost', 'PLDN--Owner'])
+      })
+
+      await expect(decide(harness, READ)).resolves.toMatchObject({
+        outcome: AuthorizationOutcome.ALLOWED,
+        grantedVesselIds: ['PLDN'],
+        unknownRoleCount: 1
+      })
     })
   })
 
@@ -460,7 +559,9 @@ describe('#createCapabilityAuthorizer', () => {
     })
 
     test('Should evaluate repeated decisions over the same snapshot consistently', async () => {
-      const harness = createHarness({ roles: rolesResult(['ReadOnlyUser']) })
+      const harness = createHarness({
+        roles: rolesResult(['VRO5--ReadOnlyUser'])
+      })
 
       const results = [
         await decide(harness, READ),
@@ -476,13 +577,13 @@ describe('#createCapabilityAuthorizer', () => {
     })
 
     test('Should never mutate the cache results it consumes', async () => {
-      const roles = rolesResult(['Owner'])
+      const roles = rolesResult(['VRO5--Owner'])
       const harness = createHarness({ roles })
 
       await decide(harness, READ)
 
       expect(Object.isFrozen(DEFINITIONS.roles)).toBe(true)
-      expect(roles.value.roleIds).toEqual(['Owner'])
+      expect(roles.value.roleIds).toEqual(['VRO5--Owner'])
     })
 
     test('Should return immutable decisions', async () => {
@@ -496,7 +597,7 @@ describe('#createCapabilityAuthorizer', () => {
   describe('logging and privacy', () => {
     test('Should log the safe decision facts without identity, roles or the capability map', async () => {
       const harness = createHarness({
-        roles: rolesResult(['Owner', 'Secret-Role'])
+        roles: rolesResult(['VRO5--Owner', 'VRO5--Secret-Role'])
       })
 
       await decide(harness, READ, { correlationId: 'corr-9' })
@@ -511,12 +612,14 @@ describe('#createCapabilityAuthorizer', () => {
       ])
       expect(logged).toContain('catch-record.read')
       expect(logged).toContain('corr-9')
-      expect(logged).not.toMatch(/user-a|Secret-Role|ReadOnlyUser/)
+      expect(logged).not.toMatch(/user-a|Secret-Role|ReadOnlyUser|VRO5/)
     })
 
     test('Should work without a logger', async () => {
       const authorizer = createCapabilityAuthorizer({
-        userRoleCache: { getUserRoles: async () => rolesResult(['Owner']) },
+        userRoleCache: {
+          getUserRoles: async () => rolesResult(['VRO5--Owner'])
+        },
         roleDefinitionsCache: {
           getRoleDefinitions: async () => definitionsResult()
         }

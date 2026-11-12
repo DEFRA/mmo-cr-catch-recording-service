@@ -48,26 +48,21 @@ new error category or per-operation error code is introduced:
   artifact-access) deny a missing/mismatched owner with safe `NOT_FOUND` — consistent with Step 09's
   owner-scoped persistence, which already returns no accessible resource rather than confirming another
   owner's record exists. This prevents horizontal resource enumeration.
-- **Vessel-access, vessel-profile, and completion policies** deny with `ACCESS_DENIED` — a vessel
+- **Vessel-access and vessel-profile policies** deny with `ACCESS_DENIED` — a vessel
   identifier or a missing administrative permission is not owner-secret information.
 
 ## The ten policies
 
-| Policy                                                                      | File                        | Gate                                                                         |
-| --------------------------------------------------------------------------- | --------------------------- | ---------------------------------------------------------------------------- |
-| Vessel access                                                               | `vessel-access-policy.js`   | Authenticated + vessel ID present in the trusted `accessibleVesselIds`       |
-| Catch Record ownership                                                      | `ownership-policy.js`       | Authenticated + exact `userId === ownerUserId` match                         |
-| Read / draft-update / draft-abandonment / submission / amendment / artifact | `resource-access-policy.js` | The ownership check above, one distinctly-named function per operation       |
-| Vessel-profile access                                                       | `vessel-profile-policy.js`  | Same gate as vessel access                                                   |
-| Restricted completion                                                       | `completion-policy.js`      | Authenticated + exact `catch-recording.complete` scope — **not** owner-gated |
+| Policy                                                                      | File                        | Gate                                                                   |
+| --------------------------------------------------------------------------- | --------------------------- | ---------------------------------------------------------------------- |
+| Vessel access                                                               | `vessel-access-policy.js`   | Authenticated + vessel ID present in the trusted `accessibleVesselIds` |
+| Catch Record ownership                                                      | `ownership-policy.js`       | Authenticated + exact `userId === ownerUserId` match                   |
+| Read / draft-update / draft-abandonment / submission / amendment / artifact | `resource-access-policy.js` | The ownership check above, one distinctly-named function per operation |
+| Vessel-profile access                                                       | `vessel-profile-policy.js`  | Same gate as vessel access                                             |
 
 Six operations (read, draft-update, draft-abandonment, submission, amendment, artifact-access) share
 identical authorisation gating today — one internal implementation, six distinctly-named, individually
 tested entry points, so each can diverge independently later without affecting the others.
-
-Completion deliberately has **no** `ownerUserId` parameter: per the approved decision, ordinary ownership
-never grants completion — it is purely permission-gated, matching its description as a _restricted
-administrative_ capability.
 
 ## Security and privacy
 

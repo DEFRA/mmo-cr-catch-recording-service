@@ -2,21 +2,13 @@
 import Hapi from '@hapi/hapi'
 
 import { vesselProfiles } from './vessel-profiles.js'
-import { authenticationPlugin } from '#/catch-recording/controller/authentication-plugin.js'
+import { registerStubAuthorization } from '#/authorization/authorization-test-fixtures.js'
 import { referenceDataPlugin } from '#/catch-recording/controller/reference-data-plugin.js'
 import { errorMapping } from '#/plugins/error-mapping.js'
 import { requestTracing } from '#/plugins/request-tracing.js'
 import { failAction } from '#/common/helpers/fail-action.js'
 
 vi.mock('@defra/cdp-auditing', () => ({ audit: vi.fn() }))
-
-const AUTH_OPTIONS = {
-  baseUrl: 'https://authentication-service.example',
-  timeoutMs: 1000,
-  retryCount: 0,
-  retryDelayMs: 0,
-  tracingHeader: 'x-cdp-request-id'
-}
 
 const REFERENCE_DATA_OPTIONS = {
   baseUrl: 'https://reference-data-service.example',
@@ -157,7 +149,7 @@ async function createTestServer() {
 
   await server.register(requestTracing)
   await server.register(errorMapping)
-  await server.register({ plugin: authenticationPlugin, options: AUTH_OPTIONS })
+  await registerStubAuthorization(server)
   await server.register({
     plugin: referenceDataPlugin,
     options: REFERENCE_DATA_OPTIONS
@@ -171,14 +163,7 @@ async function createTestServer() {
   return { server, db }
 }
 
-function mockAuth() {
-  fetchMock.mockResponseOnce(
-    JSON.stringify({ actorId: 'owner-1', permissions: [] })
-  )
-}
-
-function mockAuthAndVesselAccess({ accessibleVesselIds = ['vessel-1'] } = {}) {
-  mockAuth()
+function mockVesselAccess({ accessibleVesselIds = ['vessel-1'] } = {}) {
   fetchMock.mockResponseOnce(
     JSON.stringify({ items: accessibleVesselIds.map((id) => ({ id })) })
   )
@@ -198,7 +183,7 @@ function validPortResponse() {
 describe('vessel favourites routes', () => {
   test('GET favourite-ports returns an empty list when no profile exists', async () => {
     const { server } = await createTestServer()
-    mockAuthAndVesselAccess()
+    mockVesselAccess()
 
     const response = await server.inject({
       method: 'GET',
@@ -215,7 +200,7 @@ describe('vessel favourites routes', () => {
 
   test('POST favourite-ports validates the reference and persists it', async () => {
     const { server } = await createTestServer()
-    mockAuthAndVesselAccess()
+    mockVesselAccess()
     fetchMock.mockResponseOnce(JSON.stringify(validPortResponse()))
 
     const response = await server.inject({
@@ -234,7 +219,6 @@ describe('vessel favourites routes', () => {
 
   test('POST favourite-ports rejects an unknown payload property with a safe 400', async () => {
     const { server } = await createTestServer()
-    mockAuth()
 
     const response = await server.inject({
       method: 'POST',
@@ -248,7 +232,6 @@ describe('vessel favourites routes', () => {
 
   test('POST favourite-ports rejects a missing portId with a safe 400', async () => {
     const { server } = await createTestServer()
-    mockAuth()
 
     const response = await server.inject({
       method: 'POST',
@@ -274,7 +257,7 @@ describe('vessel favourites routes', () => {
 
   test('POST favourite-ports denies a vessel the caller cannot access with a safe 403', async () => {
     const { server } = await createTestServer()
-    mockAuthAndVesselAccess({ accessibleVesselIds: ['vessel-2'] })
+    mockVesselAccess({ accessibleVesselIds: ['vessel-2'] })
 
     const response = await server.inject({
       method: 'POST',
@@ -288,7 +271,7 @@ describe('vessel favourites routes', () => {
 
   test('DELETE favourite-ports/{portId} is safe to repeat and returns 204', async () => {
     const { server } = await createTestServer()
-    mockAuthAndVesselAccess()
+    mockVesselAccess()
 
     const first = await server.inject({
       method: 'DELETE',
@@ -297,7 +280,7 @@ describe('vessel favourites routes', () => {
     })
     expect(first.statusCode).toBe(204)
 
-    mockAuthAndVesselAccess()
+    mockVesselAccess()
     const second = await server.inject({
       method: 'DELETE',
       url: '/v1/vessels/vessel-1/favourite-ports/port-1',
@@ -310,7 +293,7 @@ describe('vessel favourites routes', () => {
 describe('vessel skipper routes', () => {
   test('GET skippers returns an empty list when no profile exists', async () => {
     const { server } = await createTestServer()
-    mockAuthAndVesselAccess()
+    mockVesselAccess()
 
     const response = await server.inject({
       method: 'GET',
@@ -327,7 +310,7 @@ describe('vessel skipper routes', () => {
 
   test('POST skippers adds a skipper with a server-generated id', async () => {
     const { server } = await createTestServer()
-    mockAuthAndVesselAccess()
+    mockVesselAccess()
 
     const response = await server.inject({
       method: 'POST',
@@ -348,7 +331,6 @@ describe('vessel skipper routes', () => {
 
   test('POST skippers rejects an invalid email with a safe 400', async () => {
     const { server } = await createTestServer()
-    mockAuth()
 
     const response = await server.inject({
       method: 'POST',
@@ -362,7 +344,6 @@ describe('vessel skipper routes', () => {
 
   test('POST skippers rejects a missing name with a safe 400', async () => {
     const { server } = await createTestServer()
-    mockAuth()
 
     const response = await server.inject({
       method: 'POST',
@@ -376,7 +357,7 @@ describe('vessel skipper routes', () => {
 
   test('DELETE skippers/{skipperId} removes the skipper and is safe to repeat', async () => {
     const { server } = await createTestServer()
-    mockAuthAndVesselAccess()
+    mockVesselAccess()
 
     const added = await server.inject({
       method: 'POST',
@@ -386,7 +367,7 @@ describe('vessel skipper routes', () => {
     })
     const skipperId = JSON.parse(added.payload).skippers[0].id
 
-    mockAuthAndVesselAccess()
+    mockVesselAccess()
     const first = await server.inject({
       method: 'DELETE',
       url: `/v1/vessels/vessel-1/skippers/${skipperId}`,
@@ -394,7 +375,7 @@ describe('vessel skipper routes', () => {
     })
     expect(first.statusCode).toBe(204)
 
-    mockAuthAndVesselAccess()
+    mockVesselAccess()
     const second = await server.inject({
       method: 'DELETE',
       url: `/v1/vessels/vessel-1/skippers/${skipperId}`,
@@ -405,7 +386,7 @@ describe('vessel skipper routes', () => {
 
   test('POST skippers denies a vessel the caller cannot access with a safe 403', async () => {
     const { server } = await createTestServer()
-    mockAuthAndVesselAccess({ accessibleVesselIds: ['vessel-2'] })
+    mockVesselAccess({ accessibleVesselIds: ['vessel-2'] })
 
     const response = await server.inject({
       method: 'POST',

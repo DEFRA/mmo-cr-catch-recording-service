@@ -51,25 +51,24 @@ Source: `src/routes/catch-records.js`. See
 
 ### Commands (create, mutate, lifecycle transitions)
 
-| Method | Path                                           | Auth                   | Description                                                                                                                                                                                                                                                                    |
-| :----- | :--------------------------------------------- | :--------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| POST   | `/v1/catch-records`                            | authentication-service | Creates the first persistent `DRAFT` Catch Record for a vessel. Optional `catchRecordReference` to supply a client-chosen friendly reference (validated for format and uniqueness; auto-generated when omitted — see below). Optional `Idempotency-Key` header. Returns `201`. |
-| PUT    | `/v1/catch-records/{catchRecordId}`            | authentication-service | Complete mobile replacement of client-owned content. Requires `If-Match` (expected version). Max payload 1 MB.                                                                                                                                                                 |
-| PATCH  | `/v1/catch-records/{catchRecordId}`            | authentication-service | Generic section save — one of `trip`, `pairFishing`, `gears`, `speciesNotLanded`. Requires `If-Match`.                                                                                                                                                                         |
-| DELETE | `/v1/catch-records/{catchRecordId}`            | authentication-service | Abandons an eligible, never-submitted `DRAFT`. Requires `If-Match`. Returns `204`, idempotent.                                                                                                                                                                                 |
-| POST   | `/v1/catch-records/{catchRecordId}/submission` | authentication-service | Submits the Catch Record — generates the immutable JSON snapshot and PDF receipt. Requires `If-Match`; optional `Idempotency-Key`.                                                                                                                                             |
-| POST   | `/v1/catch-records/{catchRecordId}/completion` | authentication-service | Restricted-permission transition `SUBMITTED → COMPLETE`. Requires `If-Match`; optional `Idempotency-Key`.                                                                                                                                                                      |
-| POST   | `/v1/catch-records/{catchRecordId}/edit-start` | authentication-service | Starts an in-place amendment (`SUBMITTED`/`COMPLETE` → `DRAFT`). Requires `If-Match`; optional `Idempotency-Key`. Amendment saves reuse the `PATCH` route above; resubmission reuses the `POST .../submission` route above.                                                    |
+| Method | Path                                           | Auth                          | Description                                                                                                                                                                                                                                                                    |
+| :----- | :--------------------------------------------- | :---------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| POST   | `/v1/catch-records`                            | Entra + `catch-record.create` | Creates the first persistent `DRAFT` Catch Record for a vessel. Optional `catchRecordReference` to supply a client-chosen friendly reference (validated for format and uniqueness; auto-generated when omitted — see below). Optional `Idempotency-Key` header. Returns `201`. |
+| PUT    | `/v1/catch-records/{catchRecordId}`            | Entra + `catch-record.update` | Complete mobile replacement of client-owned content. Requires `If-Match` (expected version). Max payload 1 MB.                                                                                                                                                                 |
+| PATCH  | `/v1/catch-records/{catchRecordId}`            | Entra + `catch-record.update` | Generic section save — one of `trip`, `pairFishing`, `gears`, `speciesNotLanded`. Requires `If-Match`.                                                                                                                                                                         |
+| DELETE | `/v1/catch-records/{catchRecordId}`            | Entra + `catch-record.update` | Abandons an eligible, never-submitted `DRAFT`. Requires `If-Match`. Returns `204`, idempotent.                                                                                                                                                                                 |
+| POST   | `/v1/catch-records/{catchRecordId}/submission` | Entra + `catch-record.submit` | Submits the Catch Record — generates the immutable JSON snapshot and PDF receipt. Requires `If-Match`; optional `Idempotency-Key`.                                                                                                                                             |
+| POST   | `/v1/catch-records/{catchRecordId}/edit-start` | Entra + `catch-record.amend`  | Starts an in-place amendment (`SUBMITTED`/`COMPLETE` → `DRAFT`). Requires `If-Match`; optional `Idempotency-Key`. Amendment saves reuse the `PATCH` route above; resubmission reuses the `POST .../submission` route above.                                                    |
 
 ### Queries
 
-| Method | Path                                                                              | Auth                   | Description                                                                                                           |
-| :----- | :-------------------------------------------------------------------------------- | :--------------------- | :-------------------------------------------------------------------------------------------------------------------- |
-| GET    | `/v1/catch-records`                                                               | authentication-service | Owner-scoped, bounded listing. Query: `limit` (default 20, max 100), optional `status` filter.                        |
-| GET    | `/v1/catch-records/{catchRecordId}`                                               | authentication-service | Complete retrieval with derived display status and domain-progress facts.                                             |
-| GET    | `/v1/catch-records/{catchRecordId}/history`                                       | authentication-service | Combined lifecycle/audit history, bounded and deterministically ordered. Query: `limit` (default 20, max 100).        |
-| GET    | `/v1/catch-records/{catchRecordId}/submissions`                                   | authentication-service | Lists every submission version's artifact metadata (no artifact body).                                                |
-| GET    | `/v1/catch-records/{catchRecordId}/submissions/{submissionNumber}/{artifactType}` | authentication-service | Retrieves one immutable artifact body. `artifactType` is `json` or `pdf`. Returns the file as an attachment download. |
+| Method | Path                                                                              | Auth                        | Description                                                                                                           |
+| :----- | :-------------------------------------------------------------------------------- | :-------------------------- | :-------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/v1/catch-records`                                                               | Entra + `catch-record.read` | Owner-scoped, bounded listing. Query: `limit` (default 20, max 100), optional `status` filter.                        |
+| GET    | `/v1/catch-records/{catchRecordId}`                                               | Entra + `catch-record.read` | Complete retrieval with derived display status and domain-progress facts.                                             |
+| GET    | `/v1/catch-records/{catchRecordId}/history`                                       | Entra + `catch-record.read` | Combined lifecycle/audit history, bounded and deterministically ordered. Query: `limit` (default 20, max 100).        |
+| GET    | `/v1/catch-records/{catchRecordId}/submissions`                                   | Entra + `catch-record.read` | Lists every submission version's artifact metadata (no artifact body).                                                |
+| GET    | `/v1/catch-records/{catchRecordId}/submissions/{submissionNumber}/{artifactType}` | Entra + `catch-record.read` | Retrieves one immutable artifact body. `artifactType` is `json` or `pdf`. Returns the file as an attachment download. |
 
 ---
 
@@ -80,35 +79,35 @@ Source: `src/routes/vessel-profiles.js`. Full contract:
 
 ### Favourite gears
 
-| Method | Path                                              | Auth                   | Description                                                                                                                                      |
-| :----- | :------------------------------------------------ | :--------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------- |
-| GET    | `/v1/vessels/{vesselId}/favourite-gears`          | authentication-service | Returns `{ vesselId, favouriteGearIds }` (empty array if none yet).                                                                              |
-| POST   | `/v1/vessels/{vesselId}/favourite-gears`          | authentication-service | Payload `{ gearId }`. Validates against the Reference Data Service. Idempotent; optional `Idempotency-Key`. Returns `200` with the updated list. |
-| DELETE | `/v1/vessels/{vesselId}/favourite-gears/{gearId}` | authentication-service | Removes the favourite. Safe to repeat. Returns `204`.                                                                                            |
+| Method | Path                                              | Auth                          | Description                                                                                                                                      |
+| :----- | :------------------------------------------------ | :---------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/v1/vessels/{vesselId}/favourite-gears`          | Entra + `catch-record.read`   | Returns `{ vesselId, favouriteGearIds }` (empty array if none yet).                                                                              |
+| POST   | `/v1/vessels/{vesselId}/favourite-gears`          | Entra + `catch-record.update` | Payload `{ gearId }`. Validates against the Reference Data Service. Idempotent; optional `Idempotency-Key`. Returns `200` with the updated list. |
+| DELETE | `/v1/vessels/{vesselId}/favourite-gears/{gearId}` | Entra + `catch-record.update` | Removes the favourite. Safe to repeat. Returns `204`.                                                                                            |
 
 ### Favourite species
 
-| Method | Path                                                   | Auth                   | Description                                                                        |
-| :----- | :----------------------------------------------------- | :--------------------- | :--------------------------------------------------------------------------------- |
-| GET    | `/v1/vessels/{vesselId}/favourite-species`             | authentication-service | Returns `{ vesselId, favouriteSpeciesIds }`.                                       |
-| POST   | `/v1/vessels/{vesselId}/favourite-species`             | authentication-service | Payload `{ speciesId }`. Same validation/idempotency behaviour as favourite gears. |
-| DELETE | `/v1/vessels/{vesselId}/favourite-species/{speciesId}` | authentication-service | Removes the favourite. Safe to repeat. Returns `204`.                              |
+| Method | Path                                                   | Auth                          | Description                                                                        |
+| :----- | :----------------------------------------------------- | :---------------------------- | :--------------------------------------------------------------------------------- |
+| GET    | `/v1/vessels/{vesselId}/favourite-species`             | Entra + `catch-record.read`   | Returns `{ vesselId, favouriteSpeciesIds }`.                                       |
+| POST   | `/v1/vessels/{vesselId}/favourite-species`             | Entra + `catch-record.update` | Payload `{ speciesId }`. Same validation/idempotency behaviour as favourite gears. |
+| DELETE | `/v1/vessels/{vesselId}/favourite-species/{speciesId}` | Entra + `catch-record.update` | Removes the favourite. Safe to repeat. Returns `204`.                              |
 
 ### Favourite ports
 
-| Method | Path                                              | Auth                   | Description                                                                     |
-| :----- | :------------------------------------------------ | :--------------------- | :------------------------------------------------------------------------------ |
-| GET    | `/v1/vessels/{vesselId}/favourite-ports`          | authentication-service | Returns `{ vesselId, favouritePortIds }`.                                       |
-| POST   | `/v1/vessels/{vesselId}/favourite-ports`          | authentication-service | Payload `{ portId }`. Same validation/idempotency behaviour as favourite gears. |
-| DELETE | `/v1/vessels/{vesselId}/favourite-ports/{portId}` | authentication-service | Removes the favourite. Safe to repeat. Returns `204`.                           |
+| Method | Path                                              | Auth                          | Description                                                                     |
+| :----- | :------------------------------------------------ | :---------------------------- | :------------------------------------------------------------------------------ |
+| GET    | `/v1/vessels/{vesselId}/favourite-ports`          | Entra + `catch-record.read`   | Returns `{ vesselId, favouritePortIds }`.                                       |
+| POST   | `/v1/vessels/{vesselId}/favourite-ports`          | Entra + `catch-record.update` | Payload `{ portId }`. Same validation/idempotency behaviour as favourite gears. |
+| DELETE | `/v1/vessels/{vesselId}/favourite-ports/{portId}` | Entra + `catch-record.update` | Removes the favourite. Safe to repeat. Returns `204`.                           |
 
 ### Vessel-owned skippers
 
-| Method | Path                                          | Auth                   | Description                                                                                                                                                                                  |
-| :----- | :-------------------------------------------- | :--------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| GET    | `/v1/vessels/{vesselId}/skippers`             | authentication-service | Returns `{ vesselId, skippers: [{ id, name, phoneNumber, email }] }`.                                                                                                                        |
-| POST   | `/v1/vessels/{vesselId}/skippers`             | authentication-service | Payload `{ name, phoneNumber?, email? }`. Server-generates `id`. Idempotent for a case-insensitive, trimmed duplicate name; optional `Idempotency-Key`. Returns `200` with the updated list. |
-| DELETE | `/v1/vessels/{vesselId}/skippers/{skipperId}` | authentication-service | Removes the skipper. Safe to repeat. Returns `204`. No update endpoint exists (deferred — no confirmed UI requirement).                                                                      |
+| Method | Path                                          | Auth                          | Description                                                                                                                                                                                  |
+| :----- | :-------------------------------------------- | :---------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/v1/vessels/{vesselId}/skippers`             | Entra + `catch-record.read`   | Returns `{ vesselId, skippers: [{ id, name, phoneNumber, email }] }`.                                                                                                                        |
+| POST   | `/v1/vessels/{vesselId}/skippers`             | Entra + `catch-record.update` | Payload `{ name, phoneNumber?, email? }`. Server-generates `id`. Idempotent for a case-insensitive, trimmed duplicate name; optional `Idempotency-Key`. Returns `200` with the updated list. |
+| DELETE | `/v1/vessels/{vesselId}/skippers/{skipperId}` | Entra + `catch-record.update` | Removes the skipper. Safe to repeat. Returns `204`. No update endpoint exists (deferred — no confirmed UI requirement).                                                                      |
 
 ---
 
