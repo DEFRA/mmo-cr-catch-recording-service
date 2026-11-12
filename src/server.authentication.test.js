@@ -1,30 +1,33 @@
 /* global fetchMock */
 import { SignJWT } from 'jose'
 
-import { config } from '#/config.js'
 import {
   createTestSigningKey,
   signTestToken,
   TEST_JWKS_URI
 } from '#/authentication/entra/entra-test-fixtures.js'
-import { createServer } from '#/server.js'
 
 const FIXED_TOKENS = ['read-token', 'write-token', 'admin-token', 'mock-token']
 const USER_ID = 'user-abc'
 
 describe('server authentication wiring (no legacy authentication path)', () => {
+  let config
   let server
   let signing
   let userProfileCalls
 
   beforeAll(async () => {
     signing = await createTestSigningKey('kid-server-test')
+    // Dynamic import needed due to config being updated by vitest-mongodb (mirrors
+    // `src/plugins/mongodb.test.js`): a static import would read MONGO_URI before it is set.
+    ;({ config } = await import('#/config.js'))
+    const { createServer } = await import('#/server.js')
     server = await createServer()
     await server.initialize()
   })
 
   afterAll(async () => {
-    await server.stop({ timeout: 0 })
+    await server?.stop({ timeout: 0 })
   })
 
   beforeEach(() => {
