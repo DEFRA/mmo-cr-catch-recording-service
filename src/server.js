@@ -8,6 +8,7 @@ import { requestLogger } from '#/plugins/request-logger.js'
 import { mongoDb } from '#/plugins/mongodb.js'
 import { errorMapping } from '#/plugins/error-mapping.js'
 import { entraSigningKeys } from '#/plugins/entra-signing-keys.js'
+import { entraAuthentication } from '#/plugins/entra-authentication.js'
 import { authenticationPlugin } from '#/catch-recording/controller/authentication-plugin.js'
 import { referenceDataPlugin } from '#/catch-recording/controller/reference-data-plugin.js'
 import { catchArtifactPlugin } from '#/catch-recording/controller/catch-artifact-plugin.js'
@@ -52,6 +53,8 @@ export async function createServer() {
   // errorMapping        - central onPreResponse boundary mapping errors to the safe public HTTP contract
   // entraSigningKeys    - decorates `server.entraSigningKeyProvider`, the shared lazily-loaded Entra OIDC
   //                       metadata/JWKS signing-key provider (not yet used to validate tokens)
+  // entraAuthentication - registers the `entra-bearer` Hapi auth strategy (local Entra access-token
+  //                       validation); dormant until a route opts in
   // authenticationPlugin - registers the trusted `authentication-service` Hapi auth scheme/strategy
   //                        (Step 13); dormant until a route opts in via `auth: 'authentication-service'`
   // referenceDataPlugin  - decorates `request.referenceDataClient` with the Step 15 Reference Data
@@ -73,6 +76,10 @@ export async function createServer() {
     {
       plugin: entraSigningKeys,
       options: { entra: config.get('entra'), allowHttp: isLocalRuntime }
+    },
+    {
+      plugin: entraAuthentication,
+      options: { entra: config.get('entra') }
     },
     {
       plugin: authenticationPlugin,

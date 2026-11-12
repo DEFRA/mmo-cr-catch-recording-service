@@ -1,6 +1,6 @@
 import { generateKeyPairSync } from 'node:crypto'
 
-import { exportJWK } from 'jose'
+import { exportJWK, SignJWT } from 'jose'
 
 export const TEST_ISSUER = 'https://login.entra.test.invalid/test-tenant/v2.0'
 export const TEST_METADATA_URL = `${TEST_ISSUER}/.well-known/openid-configuration`
@@ -20,6 +20,38 @@ export async function createTestSigningKey(
   const publicJwk = { ...(await exportJWK(publicKey)), kid: keyId, use: 'sig' }
 
   return { keyId, publicKey, privateKey, publicJwk }
+}
+
+export const TEST_AUDIENCE = 'api://catch-recording-test'
+
+/**
+ * Signs a synthetic access token with a throwaway test key. `claims` and `header` override the valid
+ * defaults; set a claim to `undefined` to omit it. `expiresIn`/`notBefore` are seconds relative to `now`.
+ */
+export async function signTestToken(
+  signing,
+  {
+    claims = {},
+    header = {},
+    now = new Date(),
+    expiresIn = 3600,
+    notBefore = -60
+  } = {}
+) {
+  const issuedAt = Math.floor(now.getTime() / 1000)
+  const payload = {
+    iss: TEST_ISSUER,
+    aud: TEST_AUDIENCE,
+    oid: '00000000-0000-4000-8000-000000000001',
+    iat: issuedAt,
+    nbf: issuedAt + notBefore,
+    exp: issuedAt + expiresIn,
+    ...claims
+  }
+
+  return new SignJWT(payload)
+    .setProtectedHeader({ alg: 'RS256', kid: signing.keyId, ...header })
+    .sign(signing.privateKey)
 }
 
 /**

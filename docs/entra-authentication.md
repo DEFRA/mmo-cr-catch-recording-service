@@ -50,3 +50,44 @@ Behaviour:
 
 Deferred: bearer-token validation (Step 03), the authenticated-user context (Step 04) and mapping of the
 failure reasons to `401`/`503` (Step 12).
+
+## Bearer access-token validation (Step 03)
+
+Code: `src/authentication/entra/` (`bearer-token.js`, `access-token-validator.js`,
+`entra-authentication-scheme.js`) and the `entraAuthentication` plugin
+(`src/plugins/entra-authentication.js`), which registers the Hapi strategy `entra-bearer`.
+
+- **Where the token comes from.** Only the standard `Authorization: Bearer <token>` header. A missing,
+  empty, repeated, malformed or non-Bearer header is rejected; the credential is read byte-for-byte and
+  is never taken from a query string, body, cookie or custom header.
+- **Validation is local**, with `jose` (no hand-written cryptography). Before any key lookup only the
+  protected header's `alg` (must be in `entra.allowedAlgorithms`, so `none`, symmetric and other
+  algorithms are rejected) and non-empty `kid` are read. The key comes **only** from the Step 02 signing
+  key provider; `jku`, `x5u` and other token-supplied key locations are ignored and no fallback key is
+  ever chosen.
+- **Enforced.** Signature, exact `iss` (`entra.issuer`), exact `aud` (`entra.audience`; a multi-valued
+  `aud` passes only if it contains that value), `exp` (required), `nbf` (when present). Substring,
+  case-folded, wildcard and alias matches are rejected. A token for another API, an ID token or one for
+  another environment fails on audience/issuer.
+- **Clock skew** is explicit and strict: `0` seconds (the validator accepts an injectable tolerance and
+  clock). Entra does not currently define a tolerance for this service; see the open items below.
+- **Token version.** The approved design does not prescribe a `ver` check, so none is invented; the exact
+  issuer (which carries the `/v2.0` path for v2 tokens) is the version binding.
+- **Result.** Success returns a deep-frozen claims object only after every check passes; failure returns
+  `{ ok: false, reason, source }` where `source` is `credentials`, `dependency` (signing keys
+  unavailable, or Entra not configured) or `internal`. Neither contains the token or any claim.
+- **Claim isolation.** Claims are never attached to the request. The `entra-bearer` strategy
+  authenticates with an empty credentials object: no user identity exists until the trusted
+  authenticated-user context is added (Step 04). A failure stops the request with the existing generic
+  `401 AUTHENTICATION_REQUIRED`; the reason stays in the internal `cause`.
+- **Not logged.** Tokens, headers and claim sets are never logged by this code.
+- **Shared state.** One validator per server reuses the shared provider; the validator holds no
+  per-request state.
+- **Dormant.** No route uses `entra-bearer` yet and the legacy `authentication-service` strategy is
+  untouched; fixed mock-token removal is Step 14. When Entra is not configured (local only) every token is
+  rejected - there is no fallback.
+
+Deferred: user identity (Step 04), `503` for key-dependency failures and the final `401` challenge
+(Step 12), telemetry (Step 13).
+
+Open item for the Identity/DevOps owners: confirm whether a bounded clock tolerance is required.
