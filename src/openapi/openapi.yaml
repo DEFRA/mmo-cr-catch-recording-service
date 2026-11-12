@@ -679,8 +679,9 @@ components:
       type: http
       scheme: bearer
       description: >-
-        A trusted bearer token validated against the Authentication Service. The caller's identity is
-        established only from an `Authorization: Bearer <token>` header.
+        A signed Microsoft Entra External ID access token, validated locally. The caller's identity is
+        established only from an `Authorization: Bearer <token>` header; permissions come from the User
+        Profile Service, never from the token.
 
   parameters:
     CatchRecordIdPath:

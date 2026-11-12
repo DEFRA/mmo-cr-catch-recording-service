@@ -1,11 +1,12 @@
 # Entra External ID authentication and authorization
 
 > Implements the approved design in `design/architecture/final-entra-external-id-authentication-and-authorization-design.md`.
-> This document grows with each implementation step; sections state what is implemented **now**. The
-> legacy Authentication Service flow described in
-> [`catch-recording-authentication.md`](./catch-recording-authentication.md) remains the runtime
-> authentication until the legacy removal step. Configuration is documented in
-> [`configuration-decisions.md`](./configuration-decisions.md).
+> The document has one section per implementation step and states what is implemented **now**. The legacy
+> Authentication Service flow was removed (see [Legacy authentication removal](#legacy-authentication-removal-step-14));
+> [`catch-recording-authentication.md`](./catch-recording-authentication.md) is only a pointer. Configuration
+> names are listed in [`configuration-decisions.md`](./configuration-decisions.md) and `.env.sample`. For
+> operations, start with the [conformance review and readiness](#architecture-conformance-and-operational-readiness-step-16)
+> section at the end.
 
 ## OIDC metadata and signing keys (Step 02)
 
@@ -636,3 +637,174 @@ bodies, correlation echo and privacy of logs and metrics.
 Known limit: the recording database stub is not a full store, so for allowed requests the tests assert that the
 resource layer was reached (validation or lookup outcome), not full domain behaviour, which is covered by the
 existing domain tests.
+
+## Architecture conformance and operational readiness (Step 16)
+
+This section is an evidence-based review of Steps 01-15 against the approved design. Status values:
+`Conformant` (implementation and test evidence), `Partially Conformant`, `Non-Conformant`, `Not Applicable`,
+`Not Verified`, `Blocked`. Nothing here is marked `Conformant` without a test or direct code inspection.
+
+### Authorization sequence
+
+```mermaid
+sequenceDiagram
+  participant C as Client
+  participant A as Entra bearer scheme
+  participant U as User Profile Service
+  participant Z as Capability enforcement
+  participant H as Handler (resource + domain rules)
+  C->>A: Authorization: Bearer token
+  A->>A: validate signature, issuer, audience, algorithm, lifetime
+  A->>Z: trusted { userId }
+  Z->>U: roles for userId (user-role cache) and role definitions (definitions cache)
+  Z->>Z: allowed / denied / unavailable
+  Z-->>C: 401 / 403 / 503 (no handler, no persistence)
+  Z->>H: allowed
+  H->>H: Joi validation, ownership, vessel, state rules, then business execution
+```
+
+Order: token validation, trusted user context, current user roles, usable role definitions, capability
+decision (`onPostAuth`, before payload validation and any database access), resource authorization, domain
+validation, business execution.
+
+### Configuration reference
+
+All settings are in `src/config.js` (convict, `strict`). The `entra.*` and `authorization.*` groups have no
+production defaults for environment-specific values: outside a local runtime they are mandatory and the
+service refuses to start without them. Examples are synthetic. Units are in the property name.
+
+| Property                                                | Environment variable                                         | Notes                                                                                  |
+| ------------------------------------------------------- | ------------------------------------------------------------ | -------------------------------------------------------------------------------------- |
+| `entra.issuer`                                          | `ENTRA_ISSUER`                                               | Exact `iss`; per environment; wildcards rejected                                       |
+| `entra.audience`                                        | `ENTRA_AUDIENCE`                                             | Exact `aud`; per environment; wildcards rejected                                       |
+| `entra.oidcMetadataUrl`                                 | `ENTRA_OIDC_METADATA_URL`                                    | HTTPS; only source of `jwks_uri`; per environment                                      |
+| `entra.allowedAlgorithms`                               | `ENTRA_ALLOWED_ALGORITHMS`                                   | Default `RS256` (only supported value)                                                 |
+| `entra.userIdClaim`                                     | `ENTRA_USER_ID_CLAIM`                                        | Stable identifier claim, for example `oid`; no fallback claim                          |
+| `entra.metadataRefreshIntervalSeconds`                  | `ENTRA_METADATA_REFRESH_INTERVAL_SECONDS`                    | Normal metadata/JWKS refresh                                                           |
+| `entra.minimumRefreshIntervalSeconds`                   | `ENTRA_MINIMUM_REFRESH_INTERVAL_SECONDS`                     | Refresh-storm throttle, including unknown `kid`                                        |
+| `entra.requestTimeoutMs`                                | `ENTRA_REQUEST_TIMEOUT_MS`                                   | Metadata and JWKS requests                                                             |
+| `authorization.serviceId`                               | `AUTHORIZATION_SERVICE_ID`                                   | Default `catch-recording`                                                              |
+| `authorization.userRolesUrlTemplate`                    | `AUTHORIZATION_USER_ROLES_URL_TEMPLATE`                      | Must contain `{entraObjectId}` once, in the path                                       |
+| `authorization.roleDefinitionsUrl`                      | `AUTHORIZATION_ROLE_DEFINITIONS_URL`                         | Must end `/roles-definitions/services/<serviceId>`                                     |
+| `authorization.userRoleCacheTtlSeconds`                 | `AUTHORIZATION_USER_ROLE_CACHE_TTL_SECONDS`                  | Default `300`                                                                          |
+| `authorization.userRoleCacheMaximumEntries`             | `AUTHORIZATION_USER_ROLE_CACHE_MAXIMUM_ENTRIES`              | Bounded, LRU eviction                                                                  |
+| `authorization.roleDefinitionsCacheTtlSeconds`          | `AUTHORIZATION_ROLE_DEFINITIONS_CACHE_TTL_SECONDS`           | Fresh period                                                                           |
+| `authorization.roleDefinitionsCacheMaximumStaleSeconds` | `AUTHORIZATION_ROLE_DEFINITIONS_CACHE_MAXIMUM_STALE_SECONDS` | Additional period after freshness during which a failed refresh may reuse the snapshot |
+| `authorization.userProfileRequestTimeoutMs`             | `USER_PROFILE_SERVICE_TIMEOUT_MS`                            | Default `2000`                                                                         |
+| `authorization.userProfileRetryCount` / `RetryDelayMs`  | `USER_PROFILE_SERVICE_RETRY_COUNT` / `_RETRY_DELAY_MS`       | Defaults `1` / `100`; only 502/503/504 are retried                                     |
+
+Values that must differ per environment: issuer, audience, metadata URL, the two User Profile Service URLs,
+and (when confirmed by the owners) timeouts, TTLs, maximum stale and cache capacity. Real values are not in
+this repository.
+
+### Architecture-conformance matrix
+
+| ID   | Requirement (design area)                                                                                                                                | Evidence (implementation / tests)                                                                                                                                                          | Status               |
+| ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------- |
+| AU-1 | Bearer header, local validation with a maintained JOSE library, RS256 allow-list, `none`/HS256 rejected                                                  | `access-token-validator.js` (jose); validator, scheme and integration tests (wrong key, `none`, HS256)                                                                                     | Conformant           |
+| AU-2 | Exact issuer, audience, expiry, not-before                                                                                                               | validator tests; integration lifetime tests with controlled clock                                                                                                                          | Conformant           |
+| AU-3 | Clock skew explicitly bounded                                                                                                                            | `DEFAULT_CLOCK_TOLERANCE_SECONDS = 0` (strict), injectable; value not yet confirmed by Identity owners                                                                                     | Partially Conformant |
+| AU-4 | Token version validated "where required"                                                                                                                 | No `ver`/version check is implemented; the design leaves "required token version and claims" as an owner decision                                                                          | Not Verified         |
+| AU-5 | Metadata/JWKS: exact `kid`, single refresh on unknown `kid`, coalescing, throttling, atomic snapshot                                                     | `signing-key-provider.js`, `oidc-metadata-client.js`, `jwks-client.js`; unit and integration tests                                                                                         | Conformant           |
+| ID-1 | Identity only from the configured claim after validation; minimal frozen context; no token/roles                                                         | `authenticated-user-context.js` (WeakSet-trusted `{ userId }`); context tests; integration tests for header/query override attempts and ignored token role claims                          | Conformant           |
+| UP-1 | Only `GET /users/{id}/roles` and `GET /roles-definitions/services/{serviceId}`; encoded path; timeout; bounded retry; correlation; token not forwarded   | `user-profile-client.js`; client and integration tests (no `authorization` header); no `token-claims` endpoint or issuance callback exists                                                 | Conformant           |
+| UP-2 | Strict response validation; mismatched user/service, duplicates, limits, empty definitions rejected; nothing invalid cached                              | `authorization-response-validator.js`; validator, cache and integration tests                                                                                                              | Conformant           |
+| RC-1 | User-role cache: keyed by user, TTL 300 s, bounded LRU, single-flight, unknown/no-role cached, failures not cached, expired never used, no maximum stale | `user-role-cache.js`; unit and integration tests                                                                                                                                           | Conformant           |
+| DC-1 | Definitions cache: lazy and best-effort post-start load, TTL, maximum stale, atomic replacement, invalid refresh keeps snapshot, over-stale fails closed | `role-definitions-cache.js`, `role-definitions-cache` plugin; unit and integration tests                                                                                                   | Conformant           |
+| CA-1 | Capability decisions allowed/denied/unavailable; any-role-grants; exact match; no wildcard/hierarchy; unknown role/capability/user denied                | `capability-authorizer.js`, `capabilities.js`; unit, mapping and integration tests                                                                                                         | Conformant           |
+| CA-2 | Assigned roles have the form `[vessel]--[role]`, matched to definition `roleId`                                                                          | `vessel-scoped-role.js` (decision recorded with the product owner during implementation, not in the original design)                                                                       | Partially Conformant |
+| EM-1 | Exact five-capability catalogue; every protected route mapped; missing mapping fails closed (startup and request)                                        | `capabilities.js`, `protected-route.js`, `capability-enforcement` plugin; `route-capabilities.test.js`                                                                                     | Conformant           |
+| EM-2 | Vessel-scoped capability enforcement for catch-record routes                                                                                             | Vessel routes are scoped to the path `vesselId`. Catch-record routes grant the capability if any vessel grants it; `grantedVesselIds` is exposed but no record/creation vessel rule exists | Partially Conformant |
+| RD-1 | Capability, resource and domain checks composed; denial before validation and DB access; masked 404 preserved                                            | `authorization-composition.test.js`, integration recording-db assertions                                                                                                                   | Conformant           |
+| PF-1 | `401` + `WWW-Authenticate: Bearer`, `403`, `503`; safe single bodies; signing-key outage is `401`                                                        | `error-mapping`, `http-error-mapper.js`; `authorization-outcomes.test.js`, integration tests                                                                                               | Conformant           |
+| OB-1 | Correlation, bounded allow-listed logs and metrics, no identifiers/tokens/keys; HTTP outcome totals                                                      | `security-telemetry.js`, `safe-log.js`; telemetry and integration privacy tests                                                                                                            | Conformant           |
+| OB-2 | Health/readiness reflects authorization dependencies                                                                                                     | `/health` stays public and dependency-free; `getStatus()` exists on the definitions cache but no readiness endpoint exists                                                                 | Partially Conformant |
+| LG-1 | Fixed tokens and Authentication Service flow removed; no fallback or bypass                                                                              | `server.authentication.test.js`, integration fixed-token tests; legacy modules and `authentication.*` config deleted                                                                       | Conformant           |
+
+Status totals: 14 Conformant, 4 Partially Conformant (AU-3, CA-2, EM-2, OB-2), 1 Not Verified (AU-4),
+0 Non-Conformant.
+
+### Documentation inventory
+
+| Topic                                             | Where documented                                                                                                                                                                 |
+| ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Entra and authorization configuration, env vars   | this section, [configuration-decisions.md](./configuration-decisions.md), `.env.sample`, README                                                                                  |
+| OIDC metadata, JWKS, rollover, token validation   | Steps 02-03 sections above                                                                                                                                                       |
+| Stable identifier, user context                   | Step 04                                                                                                                                                                          |
+| User Profile Service, response validation, caches | Steps 05-08                                                                                                                                                                      |
+| Capabilities, endpoint mapping, composition       | Steps 09-11 and [catch-recording-authorisation.md](./catch-recording-authorisation.md)                                                                                           |
+| `401`/`403`/`503`, correlation, logs, metrics     | Steps 12-13, OpenAPI, [error-handling.md](./error-handling.md)                                                                                                                   |
+| Legacy removal, test strategy                     | Steps 14-15                                                                                                                                                                      |
+| Runbook, local development                        | below and [catch-recording-operational-runbook.md](./catch-recording-operational-runbook.md), [running-locally-with-docker-compose.md](./running-locally-with-docker-compose.md) |
+
+Stale statements about the Authentication Service in the OpenAPI security-scheme description,
+`catch-recording-data-schema.md`, `catch-recording-authorisation.md` and the runbook were corrected in this
+step. Historical entries in `configuration-decisions.md` are kept and marked superseded.
+
+### Security and privacy review
+
+| Threat                                                 | Control and evidence                                                                     | Residual risk                                                                   |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Forgery, algorithm confusion, unsigned tokens          | jose verification, RS256 allow-list; integration tests for wrong key, `none`, HS256      | None known                                                                      |
+| Wrong issuer/audience, expired / not-yet-valid         | exact checks; controlled-clock tests                                                     | Clock-skew value unconfirmed (0 s)                                              |
+| Unknown-key abuse, refresh storms, key rotation        | one refresh per unknown `kid`, throttle, atomic snapshot; integration tests              | Rollover not exercised against the real tenant                                  |
+| Claim spoofing, identity override                      | only the configured claim after validation; frozen trusted context; request data ignored | None known                                                                      |
+| Path injection toward User Profile Service             | path-encoded identifier, URL template validated at startup                               | None known                                                                      |
+| Malformed, duplicate or oversized responses; poisoning | strict validator with limits; invalid data never cached                                  | None known                                                                      |
+| Cache confusion between users                          | cache key is the validated user id; isolation test                                       | Process-local caches differ across instances                                    |
+| Stale or removed authorization                         | user roles never used past TTL; definitions bounded by maximum stale                     | Role removal takes up to the TTL (300 s) to apply                               |
+| Dependency outage                                      | `503`, no persistence, never cached                                                      | Availability depends on the User Profile Service                                |
+| Hard-coded roles, missing mapping, bypass              | capabilities only; startup refuses unmapped protected routes; request-time fail closed   | None known                                                                      |
+| Side effects before authorization                      | decision at `onPostAuth`; recording-db tests prove no read or write after 403/503        | None known                                                                      |
+| Log leakage, metric cardinality                        | allow-listed fields, bounded dimensions; privacy tests                                   | Retention and access to logs depend on organisational policy (not defined here) |
+| Fixed-token fallback or development bypass             | removed; regression tests                                                                | None known                                                                      |
+
+Privacy: the request context holds only `{ userId }`; caches hold validated role and definition data only;
+no token, claim set, name or e-mail is retained; logs and metrics carry no user, role, key or token values;
+test data and documentation use synthetic values; `/health` exposes nothing about authorization.
+
+### Production-readiness gaps
+
+| Item                                                                                                               | Classification                |
+| ------------------------------------------------------------------------------------------------------------------ | ----------------------------- |
+| Real issuer, audience, metadata URL and User Profile Service URLs per environment; egress and TLS                  | Required Before Production    |
+| Production service-to-service authentication to the User Profile Service (mock has none; token is never forwarded) | Deferred by Approved Design   |
+| Confirm TTL, maximum stale, capacity, timeouts, retry policy and clock skew with owners                            | Required Before Production    |
+| Decide vessel-level enforcement for catch-record routes (EM-2), record-level and creation rules                    | Required Before Production    |
+| Confirm the abandon operation maps to `update`                                                                     | Required Before Production    |
+| Confirm token version / claim requirements (AU-4)                                                                  | Recommended Before Production |
+| Readiness reporting for authorization dependencies; tracing spans                                                  | Recommended Before Production |
+| Alert thresholds, dashboards and ownership (none are deployed; thresholds uncalibrated)                            | Operational Follow-up         |
+| Role-removal urgency; multi-instance cache consistency (process-local caches, no invalidation)                     | Deferred by Approved Design   |
+| Load and performance testing, availability objectives, incident response, key-rollover exercise, rollback plan     | Operational Follow-up         |
+| Log retention, access to security logs, data-protection review                                                     | Operational Follow-up         |
+| Local manual testing needs an external OIDC provider; no token generator or long-lived token is shipped            | Operational Follow-up         |
+| Unused persistence primitives `applyCompletion`, `findCatchRecordById` (completion endpoint removed)               | Operational Follow-up         |
+| `npm audit` reports pre-existing vulnerabilities; `npm run security-audit` (critical level) passes                 | Operational Follow-up         |
+
+### Runbook
+
+Never log or share tokens, signing keys, user identifiers, role assignments or definition bodies while diagnosing.
+
+| Signal                             | Likely component             | Safe checks                                                                                                      | Effect and recovery                                                                                |
+| ---------------------------------- | ---------------------------- | ---------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| More `401`                         | Client tokens, metadata/JWKS | `authTokenValidations` by reason; `authSigningKeyRefreshes` outcomes; configured issuer/audience values          | Requests rejected; recovers when valid tokens or keys are available                                |
+| Metadata or JWKS failure           | Entra endpoints, egress      | `authSigningKeyRefreshes` failures; network path to the metadata URL                                             | Known keys keep working from the snapshot; unknown `kid` tokens get `401` until a refresh succeeds |
+| More `403`                         | Roles or definitions data    | `authDecisions` denied by capability category; User Profile Service data for the affected population             | Operation denied; recovers when roles/definitions change (roles apply within the user-role TTL)    |
+| More authorization `503`           | User Profile Service         | `authUserProfileRequests`, `authUserProfileRetries`, `authUserRoleCacheEvents`, `authRoleDefinitionsCacheEvents` | Uncached users and expired entries are unavailable; recovers on the next successful refresh        |
+| Permitted stale definitions in use | Definitions refresh failing  | `authRoleDefinitionsCacheEvents` stale; `role-definitions-cache.refresh-failed` warnings                         | Service continues until the maximum-stale window ends; then `503`                                  |
+| Maximum-stale exhaustion           | Definitions refresh failing  | cache events over-stale                                                                                          | Authorization-protected requests return `503` until a refresh succeeds                             |
+| Missing capability mapping         | Release defect               | `authMissingMappings`; startup failure message                                                                   | Startup refuses unmapped protected routes; at request time the call fails closed with `500`        |
+| Unexpected authorization failure   | Any                          | Correlate by `x-cdp-request-id` across service and User Profile Service logs                                     | Escalate according to the organisation's incident process (none is defined in this repository)     |
+
+### Local development and automated testing
+
+- Run locally with real or fake external OIDC and User Profile Service endpoints configured through the
+  variables above; fixed tokens are unsupported and no reusable token is provided.
+- Automated tests need no live service: `src/authentication/entra/entra-test-fixtures.js` creates throwaway
+  signing keys and signed tokens, `src/integration/integrated-test-harness.js` fakes metadata, JWKS and the
+  User Profile Service, and clocks are injected so key rollover, dependency failure and cache expiry are
+  simulated without sleeping.
+- Commands: `npm test` (all tests with coverage), `npx vitest run src/integration` (integrated suite),
+  `npm run lint`, `npm run format:check`, `npm run openapi:lint`, `npm run security-audit`,
+  `npm run git:pre-commit-hook` (full gate).

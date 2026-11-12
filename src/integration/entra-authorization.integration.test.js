@@ -167,6 +167,19 @@ describe('integrated Entra authentication and capability authorization', () => {
       expect((await app.call(shortLived)).statusCode).toBe(401)
     })
 
+    test('Should take identity only from the validated token, never from headers, query or payload', async () => {
+      world.users[OTHER_USER] = []
+
+      const response = await app.call(await app.token({ oid: OTHER_USER }), {
+        url: `/v1/catch-records?userId=${USER}`,
+        headers: { 'x-user-id': USER, 'x-ms-client-principal-id': USER }
+      })
+
+      expect(response.statusCode).toBe(403)
+      expect(world.callsTo(`/users/${USER}/`)).toHaveLength(0)
+      expect(world.callsTo(`/users/${OTHER_USER}/roles`)).toHaveLength(1)
+    })
+
     test('Should ignore roles, scopes and groups carried in the token', async () => {
       const response = await app.call(
         await app.token({

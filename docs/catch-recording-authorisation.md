@@ -10,7 +10,7 @@
 Resource authorisation answers one question only: **may this already-authenticated caller perform this
 operation on this resource?** It is explicit and default-deny, and it is deliberately separate from:
 
-- **Authentication** ("who is the caller?") — produced by [Step 13](./catch-recording-authentication.md).
+- **Authentication** ("who is the caller?") — produced by Entra bearer-token validation ([`entra-authentication.md`](./entra-authentication.md)).
 - **Lifecycle policy** ("is this operation valid for the resource's current state?") — Step 08.
 - **Validation** ("is the supplied data valid?") — Step 07.
 - **Persistence** ("how is the resource stored and retrieved?") — Step 09.
@@ -21,7 +21,7 @@ Knowing a Catch Record ID or a vessel ID is never, by itself, proof of access.
 
 Every policy in this module consumes only:
 
-- The Step 13 `{ userId, scopes }` authentication context.
+- The trusted `{ userId }` authentication context (see [`entra-authentication.md`](./entra-authentication.md)).
 - Explicitly-supplied trusted resource attributes (e.g. a Catch Record's `ownerUserId`, which is always
   server-owned) or a trusted, already-resolved fact (e.g. `accessibleVesselIds`, resolved by a later
   step's Reference Data Service composition — never fetched by this module itself).
