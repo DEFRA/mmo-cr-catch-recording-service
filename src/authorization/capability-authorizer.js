@@ -145,6 +145,8 @@ function collectGrants(roleIds, capabilitiesByRole, capabilityId) {
       unknownRoleCount += 1
     } else if (capabilities.has(capabilityId)) {
       grantingVesselIds.add(scoped.vesselId)
+    } else {
+      // a known role that does not grant this capability neither grants nor counts as unknown
     }
   }
 
@@ -198,7 +200,7 @@ function evaluate(roleIds, snapshot, { capabilityId, vesselId }, context) {
   })
 }
 
-function hasValidRequest(user, capability, vesselId) {
+function hasValidRequest(capability, vesselId) {
   return (
     issuedCapabilities.has(capability) &&
     (vesselId === undefined || isValidIdentifier(vesselId))
@@ -214,7 +216,7 @@ async function decide(
   if (!isAuthenticatedUserContext(user)) {
     return unavailable(UnavailableReason.UNTRUSTED_USER_CONTEXT)
   }
-  if (!hasValidRequest(user, capability, vesselId)) {
+  if (!hasValidRequest(capability, vesselId)) {
     return unavailable(UnavailableReason.INVALID_REQUIRED_CAPABILITY)
   }
 

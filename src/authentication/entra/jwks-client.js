@@ -49,13 +49,12 @@ function isCompatibleSigningKey(jwk, allowedAlgorithms) {
   )
 }
 
+function hasKeyId(jwk) {
+  return isPlainObject(jwk) && typeof jwk.kid === 'string' && jwk.kid.length > 0
+}
+
 function isCandidateKey(jwk, allowedAlgorithms) {
-  return (
-    isPlainObject(jwk) &&
-    typeof jwk.kid === 'string' &&
-    jwk.kid.length > 0 &&
-    isCompatibleSigningKey(jwk, allowedAlgorithms)
-  )
+  return hasKeyId(jwk) && isCompatibleSigningKey(jwk, allowedAlgorithms)
 }
 
 function isUsableKeySet(document) {
