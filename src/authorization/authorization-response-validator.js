@@ -20,6 +20,20 @@ const UTC_INSTANT_FORMAT =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/
 
 /**
+ * True for a syntactically valid role or capability identifier (bounded length and character set).
+ *
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+export function isValidIdentifier(value) {
+  return (
+    typeof value === 'string' &&
+    value.length <= LIMITS.maxIdentifierLength &&
+    IDENTIFIER_FORMAT.test(value)
+  )
+}
+
+/**
  * Typed validation failures. None is an API status and none carries any part of the response body.
  */
 export const AuthorizationDataFailure = Object.freeze({

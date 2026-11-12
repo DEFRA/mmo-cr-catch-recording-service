@@ -298,3 +298,46 @@ over-stale  now >= maximumStaleUntil   (never usable)
   `over-stale`) for later health reporting; the public `/health` is unchanged in this step.
 - **Process-local.** Instances do not share snapshots; a restart empties the cache.
 - **Logging.** Debug/warn events carry no role, capability, response body or user data; metrics are Step 13.
+
+## Capability authorization engine (Step 09)
+
+Code: `src/authorization/capability-authorizer.js`; registered once by the `capabilityAuthorizer` plugin
+(`src/plugins/capability-authorizer.js`) as `server.capabilityAuthorizer` (`null` only when authorization is
+unconfigured in local development). It is stateless and not yet applied to any endpoint (Step 10/11).
+
+`authorize(user, requiredCapability, { correlationId, signal })` returns one frozen decision:
+
+| `outcome`     | Meaning                                                               | `reason` values                                                                                                                                                                                                                        |
+| ------------- | --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `allowed`     | at least one known assigned role grants the exact capability          | - (carries `capability`, `definitionsVersion`, cache states, `staleDefinitionsUsed`, `unknownRoleCount`)                                                                                                                               |
+| `denied`      | data was available and nothing grants it                              | `NO_ASSIGNED_ROLES`, `ALL_ASSIGNED_ROLES_UNKNOWN`, `CAPABILITY_NOT_GRANTED`, `REQUIRED_CAPABILITY_UNKNOWN`                                                                                                                             |
+| `unavailable` | authorization could not be evaluated (never a denial, never an allow) | `UNTRUSTED_USER_CONTEXT`, `INVALID_REQUIRED_CAPABILITY`, `USER_ROLES_UNAVAILABLE`, `ROLE_DEFINITIONS_UNAVAILABLE`, `ROLE_DEFINITIONS_OVER_STALE`, `AUTHORIZATION_DATA_INVALID`, `CANCELLED`, `INTERNAL_FAILURE` (with a safe `detail`) |
+
+The engine maps nothing to HTTP (Step 12 maps `denied` -> `403` and `unavailable` -> `503`).
+
+Deterministic order: trusted user context and required capability valid -> current user roles (Step 07)
+-> empty roles (unknown user or no roles) denied **without** loading definitions -> usable definitions
+(Step 08) -> capability absent from every definition denied -> any known assigned role grants -> allowed.
+
+- **Any-role-grants, exact matching.** Roles and capabilities are compared as exact strings: no prefix,
+  suffix, substring, wildcard, regex, case, trim, alias, hierarchy or inheritance behaviour. `catch-record.read`
+  never implies another capability and a wildcard-looking identifier grants nothing beyond itself.
+- **Unknown roles grant nothing** and are not dependency failures; they never block a grant from a known
+  role (only a count is kept for diagnostics). An unknown required capability is denied, never
+  unavailable.
+- **Trust.** Roles come only from the Step 07 result, definitions only from Step 08; the engine never
+  recalculates TTL or maximum stale, never refreshes independently, and never reads token roles, groups
+  or scopes. Permitted stale definitions are usable and marked (`staleDefinitionsUsed`). Expired user roles
+  and over-stale definitions arrive as failures and are `unavailable`.
+- **Required capability type.** `createRequiredCapability(id)` returns a frozen value (exact, valid
+  identifier required); only values it issued are accepted, so a role id or arbitrary string cannot be used
+  by mistake. The capability catalogue and endpoint mappings are Step 10.
+- **Fail closed.** An unexpected exception, an untrusted user context or a non-issued capability yields
+  `unavailable`; nothing defaults to allow.
+- **Logging.** One `authorization.decision` entry (outcome, reason, capability, definitions version, cache
+  states, correlation id); never the user identifier, role list or capability map.
+
+Open item to confirm before production: the design's examples show assigned roles such as `VRO5--Owner`
+alongside definitions named `Owner`. The approved rule (design 8.9) is an exact lookup of each assigned role
+id in the definitions, and no name inference or alias handling is added, so assigned role ids must equal
+definition `roleId`s.

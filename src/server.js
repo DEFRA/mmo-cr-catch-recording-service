@@ -12,6 +12,7 @@ import { entraAuthentication } from '#/plugins/entra-authentication.js'
 import { userProfile } from '#/plugins/user-profile-client.js'
 import { userRoleCache } from '#/plugins/user-role-cache.js'
 import { roleDefinitionsCache } from '#/plugins/role-definitions-cache.js'
+import { capabilityAuthorizer } from '#/plugins/capability-authorizer.js'
 import { authenticationPlugin } from '#/catch-recording/controller/authentication-plugin.js'
 import { referenceDataPlugin } from '#/catch-recording/controller/reference-data-plugin.js'
 import { catchArtifactPlugin } from '#/catch-recording/controller/catch-artifact-plugin.js'
@@ -64,6 +65,8 @@ export async function createServer() {
   //                       (validated assignments only); not yet used by any request path
   // roleDefinitionsCache - decorates `server.roleDefinitionsCache`, the single role-to-capability snapshot
   //                       cache; attempts one best-effort load after start; not yet used by any request path
+  // capabilityAuthorizer - decorates `server.capabilityAuthorizer`, the stateless any-role-grants capability
+  //                       engine over the two caches; not yet applied to any endpoint
   // authenticationPlugin - registers the trusted `authentication-service` Hapi auth scheme/strategy
   //                        (Step 13); dormant until a route opts in via `auth: 'authentication-service'`
   // referenceDataPlugin  - decorates `request.referenceDataClient` with the Step 15 Reference Data
@@ -114,6 +117,7 @@ export async function createServer() {
         )
       }
     },
+    capabilityAuthorizer,
     {
       plugin: authenticationPlugin,
       options: {
