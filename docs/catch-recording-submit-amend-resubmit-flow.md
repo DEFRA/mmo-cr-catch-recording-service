@@ -25,12 +25,12 @@ stateDiagram-v2
 - Every submission produces two immutable artifacts (a JSON snapshot and a PDF receipt) numbered by
   submission, so earlier submissions stay retrievable after any number of amendments.
 
-| Step | Request                                  | Capability            | Source state                | Result state                           |
-| ---- | ---------------------------------------- | --------------------- | --------------------------- | -------------------------------------- |
-| 1    | `POST /v1/catch-records/{id}/submission` | `catch-record.submit` | `DRAFT`, 0 submissions      | `SUBMITTED`, 1 submission              |
-| 2    | `POST /v1/catch-records/{id}/edit-start` | `catch-record.amend`  | `SUBMITTED` | `DRAFT`, `hasUnsubmittedChanges: true` |
-| 3    | `PATCH /v1/catch-records/{id}` (repeat)  | `catch-record.update` | `DRAFT` (amended)           | `DRAFT`, still `hasUnsubmittedChanges` |
-| 4    | `POST /v1/catch-records/{id}/submission` | `catch-record.submit` | `DRAFT`, ≥1 submission      | `SUBMITTED`, count + 1                 |
+| Step | Request                                  | Capability            | Source state           | Result state                           |
+| ---- | ---------------------------------------- | --------------------- | ---------------------- | -------------------------------------- |
+| 1    | `POST /v1/catch-records/{id}/submission` | `catch-record.submit` | `DRAFT`, 0 submissions | `SUBMITTED`, 1 submission              |
+| 2    | `POST /v1/catch-records/{id}/edit-start` | `catch-record.amend`  | `SUBMITTED`            | `DRAFT`, `hasUnsubmittedChanges: true` |
+| 3    | `PATCH /v1/catch-records/{id}` (repeat)  | `catch-record.update` | `DRAFT` (amended)      | `DRAFT`, still `hasUnsubmittedChanges` |
+| 4    | `POST /v1/catch-records/{id}/submission` | `catch-record.submit` | `DRAFT`, ≥1 submission | `SUBMITTED`, count + 1                 |
 
 All calls need a valid Entra bearer token and the capability above (see
 [entra-authentication.md](./entra-authentication.md)); the capability check runs before validation and any
@@ -100,14 +100,13 @@ Entry point: `startCatchRecordEdit` in `src/catch-recording/controller/start-cat
 5. History event `EDIT_STARTED`.
 6. Response: the standard save response. It now shows `displayStatus: Amended`.
 
-
 ## 3. Editing while amended
 
 Edits use the normal section endpoint `PATCH /v1/catch-records/{id}` with `If-Match` and a body of
 `{ "section": "<name>", "data": ... }` (`data` is an array for `gears` and `speciesNotLanded`, an object for
 other sections). No separate amendment endpoint exists.
 
-- The update is applied only while `status = DRAFT`. Patching a `SUBMITTED` or  record is rejected
+- The update is applied only while `status = DRAFT`. Patching a `SUBMITTED` or record is rejected
   (`CATCH_RECORD_SECTION_UPDATE_INELIGIBLE`), so edit-start is mandatory first.
 - Each save increments `version`; send the latest `version` as the next `If-Match`. A stale value is a
   `VERSION_CONFLICT` (`409`).
@@ -149,7 +148,7 @@ GET    /v1/catch-records/{id}/submissions                -> submissions 1 and 2,
 | -------------------------------------------- | ---------------------------------------- | -------------------------------------------------------- |
 | Missing or foreign record                    | `CATCH_RECORD_NOT_FOUND` (404)           | Masked to prevent enumeration                            |
 | Stale `If-Match` version                     | `VERSION_CONFLICT` (409)                 | Re-read the record and retry with its version            |
-| Submit from `SUBMITTED` | `CATCH_RECORD_SUBMISSION_INELIGIBLE`     | Start an edit first                                      |
+| Submit from `SUBMITTED`                      | `CATCH_RECORD_SUBMISSION_INELIGIBLE`     | Start an edit first                                      |
 | Edit-start from a draft                      | `CATCH_RECORD_EDIT_START_INELIGIBLE`     |                                                          |
 | PATCH on a non-draft                         | `CATCH_RECORD_SECTION_UPDATE_INELIGIBLE` | Call edit-start first                                    |
 | Record incomplete or invalid at submission   | `SUBMISSION_VALIDATION_FAILED`           | `details` lists the issues                               |

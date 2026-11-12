@@ -184,9 +184,9 @@ async function resolveSubmissionSnapshot({
     })
     return JSON.parse(existingJson.body.toString('utf8'))
   } catch (error) {
-    if (!(
-      isApplicationError(error) && error.code === 'CATCH_ARTIFACT_NOT_FOUND'
-    )) {
+    if (
+      !(isApplicationError(error) && error.code === 'CATCH_ARTIFACT_NOT_FOUND')
+    ) {
       throw error
     }
   }
