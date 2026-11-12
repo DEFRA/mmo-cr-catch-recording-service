@@ -11,6 +11,7 @@ import { entraSigningKeys } from '#/plugins/entra-signing-keys.js'
 import { entraAuthentication } from '#/plugins/entra-authentication.js'
 import { userProfile } from '#/plugins/user-profile-client.js'
 import { userRoleCache } from '#/plugins/user-role-cache.js'
+import { roleDefinitionsCache } from '#/plugins/role-definitions-cache.js'
 import { authenticationPlugin } from '#/catch-recording/controller/authentication-plugin.js'
 import { referenceDataPlugin } from '#/catch-recording/controller/reference-data-plugin.js'
 import { catchArtifactPlugin } from '#/catch-recording/controller/catch-artifact-plugin.js'
@@ -61,6 +62,8 @@ export async function createServer() {
   //                       client (user roles and role definitions); not yet used by any request path
   // userRoleCache       - decorates `server.userRoleCache`, the bounded process-local user-role cache
   //                       (validated assignments only); not yet used by any request path
+  // roleDefinitionsCache - decorates `server.roleDefinitionsCache`, the single role-to-capability snapshot
+  //                       cache; attempts one best-effort load after start; not yet used by any request path
   // authenticationPlugin - registers the trusted `authentication-service` Hapi auth scheme/strategy
   //                        (Step 13); dormant until a route opts in via `auth: 'authentication-service'`
   // referenceDataPlugin  - decorates `request.referenceDataClient` with the Step 15 Reference Data
@@ -99,6 +102,16 @@ export async function createServer() {
       options: {
         ttlSeconds: config.get('authorization.userRoleCacheTtlSeconds'),
         maximumEntries: config.get('authorization.userRoleCacheMaximumEntries')
+      }
+    },
+    {
+      plugin: roleDefinitionsCache,
+      options: {
+        serviceId: config.get('authorization.serviceId'),
+        ttlSeconds: config.get('authorization.roleDefinitionsCacheTtlSeconds'),
+        maximumStaleSeconds: config.get(
+          'authorization.roleDefinitionsCacheMaximumStaleSeconds'
+        )
       }
     },
     {

@@ -244,3 +244,57 @@ error). Failures are never cached and never become an empty role set.
 - **Logging.** Debug events (hit, miss, expired, refresh started/succeeded/failed/coalesced, inserted,
   replaced, evicted, capacity reached) carry no user identifier, role, token or response body; metrics are
   part of Step 13.
+
+## Role-definition cache (Step 08)
+
+Code: `src/authorization/role-definitions-cache.js`; registered once by the `roleDefinitionsCache` plugin
+(`src/plugins/role-definitions-cache.js`) as `server.roleDefinitionsCache` (`null` only when authorization
+is unconfigured in local development; cleared on server stop). It is a separate cache from the user-role
+cache and is not yet used by any request path.
+
+It holds **one** immutable snapshot for `authorization.serviceId`: the Step 06 validated definitions plus
+local timing. No user, token, user-role assignment, DTO, JSON or HTTP object is stored, and no
+caller-supplied service identifier is accepted.
+
+Timing is local and monotonic, measured from the successful load (`downstream updatedAt` is metadata only):
+
+```text
+freshUntil        = loadedAt + authorization.roleDefinitionsCacheTtlSeconds
+maximumStaleUntil = freshUntil + authorization.roleDefinitionsCacheMaximumStaleSeconds   (additional window)
+
+fresh       now <  freshUntil
+stale       freshUntil <= now < maximumStaleUntil
+over-stale  now >= maximumStaleUntil   (never usable)
+```
+
+`getRoleDefinitions({ correlationId, signal })`:
+
+| Held snapshot | Behaviour                                                                                                                                                             |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| absent        | single-flight load; success -> `loaded`; failure -> `{ ok: false, snapshotState: 'absent' }`                                                                          |
+| fresh         | returned without a request (`hit`); reading never extends a lifetime                                                                                                  |
+| stale         | refresh; success -> `refreshed`; failure -> the previous snapshot with `cacheState: 'stale-used'`, `freshness: 'stale'` and a safe `refreshFailure`, timing unchanged |
+| over-stale    | refresh; success -> `refreshed`; failure -> `{ ok: false, snapshotState: 'over-stale' }` - the old snapshot is not returned                                           |
+
+- Success is `{ ok: true, snapshot, freshness, cacheState }`; failures keep the Step 05/06 typed shape
+  (`source: 'dependency' | 'validation' | 'cache'`) and are never turned into an empty or permissive map.
+  The staleness of the previous snapshot is re-evaluated after the refresh returns, so a slow refresh can
+  never yield a snapshot past its boundary.
+- **Never replaced by bad data.** Dependency errors, invalid or mismatched content, an unsupported schema
+  and empty definitions (rejected by Step 06) neither replace nor clear a valid snapshot. An older result
+  never overwrites a newer snapshot; publication is one atomic assignment of a complete frozen snapshot.
+- **Single-flight.** There is one service-level refresh shared by every concurrent caller (initial, stale
+  and over-stale); a cancelled caller stops waiting without cancelling it; coordination state is always
+  released so a failure never blocks a later attempt.
+- **Startup.** After the server starts, one best-effort load is attempted through the same refresh
+  operation; it is not awaited, never prevents startup and never blocks `/health`. If it fails, no snapshot
+  exists and authorization stays unavailable until a lazy load succeeds (fail closed).
+- **Refresh throttling.** No minimum-interval setting is approved for role definitions, so none is invented:
+  single-flight bounds the dependency to one in-flight request, but during a User Profile Service outage
+  each lookup that finds a stale or absent snapshot still starts the next attempt after the previous one
+  ends. A refresh back-off/minimum interval is a recommended production follow-up (a new configuration
+  decision).
+- **Diagnostics.** `getStatus()` returns only `{ state, definitionsVersion }` (`absent`, `fresh`, `stale`,
+  `over-stale`) for later health reporting; the public `/health` is unchanged in this step.
+- **Process-local.** Instances do not share snapshots; a restart empties the cache.
+- **Logging.** Debug/warn events carry no role, capability, response body or user data; metrics are Step 13.
