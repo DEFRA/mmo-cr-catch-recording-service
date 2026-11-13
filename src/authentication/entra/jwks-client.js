@@ -22,12 +22,17 @@ function hasPlausibleExponent(encodedExponent) {
   )
 }
 
+function allowsVerification(keyOps) {
+  return (
+    keyOps === undefined || (Array.isArray(keyOps) && keyOps.includes('verify'))
+  )
+}
+
 function hasSigningUse(jwk, allowedAlgorithms) {
   return (
     (jwk.use === undefined || jwk.use === 'sig') &&
     (jwk.alg === undefined || allowedAlgorithms.includes(jwk.alg)) &&
-    (jwk.key_ops === undefined ||
-      (Array.isArray(jwk.key_ops) && jwk.key_ops.includes('verify')))
+    allowsVerification(jwk.key_ops)
   )
 }
 
