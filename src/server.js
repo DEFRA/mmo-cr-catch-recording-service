@@ -2,12 +2,19 @@ import Hapi from '@hapi/hapi'
 
 import { secureContext } from '@defra/hapi-secure-context'
 
-import { config } from '#/config.js'
+import { config, isLocalRuntime } from '#/config.js'
 import { router } from '#/plugins/router.js'
 import { requestLogger } from '#/plugins/request-logger.js'
 import { mongoDb } from '#/plugins/mongodb.js'
 import { errorMapping } from '#/plugins/error-mapping.js'
-import { authenticationPlugin } from '#/catch-recording/controller/authentication-plugin.js'
+import { securityTelemetry } from '#/plugins/security-telemetry.js'
+import { entraSigningKeys } from '#/plugins/entra-signing-keys.js'
+import { entraAuthentication } from '#/plugins/entra-authentication.js'
+import { userProfile } from '#/plugins/user-profile-client.js'
+import { userRoleCache } from '#/plugins/user-role-cache.js'
+import { roleDefinitionsCache } from '#/plugins/role-definitions-cache.js'
+import { capabilityAuthorizer } from '#/plugins/capability-authorizer.js'
+import { capabilityEnforcement } from '#/plugins/capability-enforcement.js'
 import { referenceDataPlugin } from '#/catch-recording/controller/reference-data-plugin.js'
 import { catchArtifactPlugin } from '#/catch-recording/controller/catch-artifact-plugin.js'
 import { failAction } from '#/common/helpers/fail-action.js'
@@ -15,8 +22,8 @@ import { pulse } from '#/plugins/pulse.js'
 import { requestTracing } from '#/plugins/request-tracing.js'
 import { metrics } from '@defra/cdp-metrics'
 
-export async function createServer() {
-  const server = Hapi.server({
+function serverOptions() {
+  return {
     host: config.get('host'),
     port: config.get('port'),
     routes: {
@@ -40,7 +47,51 @@ export async function createServer() {
     router: {
       stripTrailingSlash: true
     }
-  })
+  }
+}
+
+/** Entra authentication, User Profile Service, caches and capability enforcement, in dependency order. */
+function authorizationPlugins() {
+  return [
+    {
+      plugin: entraSigningKeys,
+      options: { entra: config.get('entra'), allowHttp: isLocalRuntime }
+    },
+    {
+      plugin: entraAuthentication,
+      options: { entra: config.get('entra') }
+    },
+    {
+      plugin: userProfile,
+      options: {
+        ...config.get('authorization'),
+        tracingHeader: config.get('tracing.header')
+      }
+    },
+    {
+      plugin: userRoleCache,
+      options: {
+        ttlSeconds: config.get('authorization.userRoleCacheTtlSeconds'),
+        maximumEntries: config.get('authorization.userRoleCacheMaximumEntries')
+      }
+    },
+    {
+      plugin: roleDefinitionsCache,
+      options: {
+        serviceId: config.get('authorization.serviceId'),
+        ttlSeconds: config.get('authorization.roleDefinitionsCacheTtlSeconds'),
+        maximumStaleSeconds: config.get(
+          'authorization.roleDefinitionsCacheMaximumStaleSeconds'
+        )
+      }
+    },
+    capabilityAuthorizer,
+    capabilityEnforcement
+  ]
+}
+
+export async function createServer() {
+  const server = Hapi.server(serverOptions())
 
   // Hapi Plugins:
   // requestLogger       - automatically logs incoming requests
@@ -49,8 +100,23 @@ export async function createServer() {
   // pulse               - provides shutdown handlers
   // mongoDb             - sets up mongo connection pool and attaches to `server` and `request` objects
   // errorMapping        - central onPreResponse boundary mapping errors to the safe public HTTP contract
-  // authenticationPlugin - registers the trusted `authentication-service` Hapi auth scheme/strategy
-  //                        (Step 13); dormant until a route opts in via `auth: 'authentication-service'`
+  // securityTelemetry   - decorates `server.securityTelemetry`: the bounded, privacy-safe logging and
+  //                       metrics sink shared by every authentication and authorization component
+  // entraSigningKeys    - decorates `server.entraSigningKeyProvider`, the shared lazily-loaded Entra OIDC
+  //                       metadata/JWKS signing-key provider (not yet used to validate tokens)
+  // entraAuthentication - registers the `entra-bearer` Hapi auth strategy (local Entra access-token
+  //                       validation); dormant until a route opts in
+  // userProfile         - decorates `server.userProfileClient`, the shared User Profile Service transport
+  //                       client (user roles and role definitions); not yet used by any request path
+  // userRoleCache       - decorates `server.userRoleCache`, the bounded process-local user-role cache
+  //                       (validated assignments only); not yet used by any request path
+  // roleDefinitionsCache - decorates `server.roleDefinitionsCache`, the single role-to-capability snapshot
+  //                       cache; attempts one best-effort load after start; not yet used by any request path
+  // capabilityAuthorizer - decorates `server.capabilityAuthorizer`, the stateless any-role-grants capability
+  //                       engine over the two caches; not yet applied to any endpoint
+  // capabilityEnforcement - the single onPostAuth capability check for every authenticated route (route
+  //                       metadata via `protectedRoute`); fails closed and refuses to start on a protected
+  //                       route without a catalogue capability
   // referenceDataPlugin  - decorates `request.referenceDataClient` with the Step 15 Reference Data
   //                        Service client (built once from config)
   // catchArtifactPlugin  - decorates `request.catchArtifactStore` with the Step 33 S3-compatible
@@ -66,14 +132,9 @@ export async function createServer() {
       plugin: mongoDb,
       options: config.get('mongo')
     },
+    securityTelemetry,
     errorMapping,
-    {
-      plugin: authenticationPlugin,
-      options: {
-        ...config.get('authentication'),
-        tracingHeader: config.get('tracing.header')
-      }
-    },
+    ...authorizationPlugins(),
     {
       plugin: referenceDataPlugin,
       options: {

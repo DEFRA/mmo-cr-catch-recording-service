@@ -17,7 +17,7 @@ manually with `curl`. For the full endpoint list see
 `compose.yml` already sets `MONGO_URI`, `CATCH_ARTIFACTS_BUCKET`, `CATCH_ARTIFACTS_FORCE_PATH_STYLE`, and
 `AWS_ENDPOINT_URL` directly in the service's `environment:` block, plus AWS dummy credentials via
 `compose/aws.env` (floci's well-known public test values, not real secrets). It does **not** set
-`AUTHENTICATION_SERVICE_URL` or `REFERENCE_DATA_SERVICE_URL`/`REFERENCE_DATA_SERVICE_TOKEN` — see
+the `ENTRA_*`/`AUTHORIZATION_*` settings or `REFERENCE_DATA_SERVICE_URL`/`REFERENCE_DATA_SERVICE_TOKEN` — see
 [Testing authenticated endpoints](#testing-authenticated-endpoints) below for why that matters and how to
 add them.
 
@@ -25,8 +25,8 @@ add them.
 
 - Docker and Docker Compose.
 - `curl` (or any HTTP client).
-- Optional: a reachable Authentication Service and Reference Data Service (real or mock) if you want to
-  exercise anything beyond `/health`/`/example` — see below.
+- Optional: an Entra-compatible OIDC/JWKS endpoint, a User Profile Service (the mock) and a Reference Data
+  Service (real or mock) if you want to exercise anything beyond `/health`/`/example` — see below.
 
 ## Starting the service
 
@@ -80,36 +80,48 @@ Expected: `curl -i "$CR_URL/health"` returns `200` with `{"message":"success"}`.
 
 ## Testing authenticated endpoints
 
-Every `/v1/catch-records...` and `/v1/vessels/{vesselId}/...` endpoint requires the trusted
-`authentication-service` Hapi strategy (see
-[`docs/catch-recording-authentication.md`](./catch-recording-authentication.md)). On every request, the
-server extracts your `Authorization: $TOKEN header and calls out to
-`AUTHENTICATION_SERVICE_URL` to validate it — it never trusts the token itself.
+Every `/v1/catch-records...` and `/v1/vessels/{vesselId}/...` endpoint requires a valid, signed **Microsoft
+Entra External ID access token**; fixed static tokens such as `read-token` are **not supported** and are
+rejected with `401`. The service validates the token locally against the keys published by the configured
+OIDC metadata URL, then reads the caller's roles and the role-to-capability definitions from the User
+Profile Service (the mock is unauthenticated; the incoming token is never forwarded to it). See
+[`docs/entra-authentication.md`](./entra-authentication.md).
 
-### Without an Authentication Service configured
+### Without Entra configured
 
-By default (plain `docker compose up`), `AUTHENTICATION_SERVICE_URL` is unset, so every authenticated
-request fails safely:
+By default (plain `docker compose up`) the `ENTRA_*` settings are unset, which is permitted only for local
+development, so every authenticated request fails safely:
 
 ```bash
-curl -i "$CR_URL/v1/catch-records" \
-  -H "Authorization: $TOKEN"
+curl -i "$CR_URL/v1/catch-records" -H "Authorization: Bearer <any-token>"
 ```
 
-Expected: `401` with a safe `AUTHENTICATION_REQUIRED` body — this is correct, documented behaviour, not a
-bug (see `docs/catch-recording-known-risks.md`).
+Expected: `401` with a safe `AUTHENTICATION_REQUIRED` body and `WWW-Authenticate: Bearer`.
 
-### With an Authentication Service and Reference Data Service configured
+### With Entra, a User Profile Service and a Reference Data Service configured
 
-If you have a mock or real Authentication Service and Reference Data Service reachable on the same Docker
-network, wire them in **without editing the committed `compose.yml`** by creating a
-`docker-compose.override.yml` (Docker Compose merges this automatically):
+Automated tests never call live Microsoft Entra: they sign synthetic tokens with throwaway local keys
+(`src/authentication/entra/entra-test-fixtures.js`). For manual testing you need an OIDC provider whose
+metadata URL, issuer and audience you configure, and a token it issued for the configured audience; this
+repository does not ship a token generator and **no reusable token is documented**. Wire the services in
+**without editing the committed `compose.yml`** by creating a `docker-compose.override.yml`:
 
 ```yaml
 services:
   mmo-cr-catch-recording-service:
     environment:
-      AUTHENTICATION_SERVICE_URL: http://mmo-cr-authentication-service:3001
+      ENTRA_ISSUER: <expected-token-issuer>
+      ENTRA_AUDIENCE: <catch-recording-api-audience>
+      ENTRA_OIDC_METADATA_URL: <openid-configuration-url>
+      ENTRA_USER_ID_CLAIM: oid
+      ENTRA_METADATA_REFRESH_INTERVAL_SECONDS: 3600
+      ENTRA_MINIMUM_REFRESH_INTERVAL_SECONDS: 60
+      ENTRA_REQUEST_TIMEOUT_MS: 2000
+      AUTHORIZATION_USER_ROLES_URL_TEMPLATE: http://mmo-cr-user-profile-service:3001/users/{entraObjectId}/roles
+      AUTHORIZATION_ROLE_DEFINITIONS_URL: http://mmo-cr-user-profile-service:3001/roles-definitions/services/catch-recording
+      AUTHORIZATION_USER_ROLE_CACHE_MAXIMUM_ENTRIES: 1000
+      AUTHORIZATION_ROLE_DEFINITIONS_CACHE_TTL_SECONDS: 300
+      AUTHORIZATION_ROLE_DEFINITIONS_CACHE_MAXIMUM_STALE_SECONDS: 900
       REFERENCE_DATA_SERVICE_URL: http://mmo-cr-reference-data-service:3002
       REFERENCE_DATA_SERVICE_TOKEN: local-dev-service-token
     networks:
@@ -124,12 +136,12 @@ docker compose up --build -d
 ```
 
 Now the full journey can be exercised with `curl`. The variables below are illustrative — substitute
-values your configured Authentication Service and Reference Data Service actually accept/recognise:
+values your configured identity provider, User Profile Service and Reference Data Service actually accept/recognise:
 
 ```bash
 export CR_URL=http://localhost:3001
-export TOKEN="<TOKEN>"                             # a bearer token your Authentication Service accepts
-export VESSEL_ID="<VESSEL_ID>"                      # a vessel ID your Reference Data Service resolves and authorises for $TOKEN
+export TOKEN="<TOKEN>"                             # an Entra access token for the configured audience
+export VESSEL_ID="<VESSEL_ID>"                      # a vessel ID your Reference Data Service resolves and authorises for the token's user
 export PORT_ID="<PORT_ID>"                          # an active port GUID known to the Reference Data Service
 export GEAR_ID="<GEAR_ID>"                          # an active gear GUID known to the Reference Data Service
 export CHARACTERISTIC_ID="<CHARACTERISTIC_ID>"      # a characteristicId belonging to $GEAR_ID
@@ -150,7 +162,7 @@ Source: `src/routes/catch-records.js`. Full contracts:
 # catchRecordReference, if supplied, must match the approved GBR-{RSS}-{DDMMYY}-{HHMMSS} format and be
 # unique - omit it to let the service generate one. Idempotency-Key header is optional.
 curl -i -X POST "$CR_URL/v1/catch-records" \
-  -H "Authorization: $TOKEN" \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: $(uuidgen)" \
   -d "{\"vesselId\": \"$VESSEL_ID\"}"
@@ -161,15 +173,15 @@ export VERSION=1
 
 # List your own Catch Records (query: limit default 20/max 100, optional status filter)
 curl -i "$CR_URL/v1/catch-records?limit=20" \
-  -H "Authorization: $TOKEN"
+  -H "Authorization: Bearer $TOKEN"
 
 # Retrieve one Catch Record
 curl -i "$CR_URL/v1/catch-records/$CATCH_RECORD_ID" \
-  -H "Authorization: $TOKEN"
+  -H "Authorization: Bearer $TOKEN"
 
 # Combined lifecycle/audit history (query: limit default 20/max 100)
 curl -i "$CR_URL/v1/catch-records/$CATCH_RECORD_ID/history?limit=20" \
-  -H "Authorization: $TOKEN"
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 #### Saving a section (`PATCH`)
@@ -183,7 +195,7 @@ takes an object). A successful save returns the updated Catch Record and its new
 # trip — a complete section object. startedAndFinishedToday:true discards dateStarted/dateEnded
 # (server-recomputed); set it to false to supply explicit ISO dates instead.
 curl -i -X PATCH "$CR_URL/v1/catch-records/$CATCH_RECORD_ID" \
-  -H "Authorization: $TOKEN" \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -H "If-Match: $VERSION" \
   -d "{
@@ -198,7 +210,7 @@ curl -i -X PATCH "$CR_URL/v1/catch-records/$CATCH_RECORD_ID" \
 # pairFishing — enabled:false requires pairVessel/pairSkipperName to be null or absent;
 # enabled:true requires both as non-empty strings.
 curl -i -X PATCH "$CR_URL/v1/catch-records/$CATCH_RECORD_ID" \
-  -H "Authorization: $TOKEN" \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -H "If-Match: $VERSION" \
   -d '{
@@ -208,7 +220,7 @@ curl -i -X PATCH "$CR_URL/v1/catch-records/$CATCH_RECORD_ID" \
 
 # gears — an array. Each entry needs gear.id; statisticalArea/characteristics/speciesCaught are optional.
 curl -i -X PATCH "$CR_URL/v1/catch-records/$CATCH_RECORD_ID" \
-  -H "Authorization: $TOKEN" \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -H "If-Match: $VERSION" \
   -d "{
@@ -235,7 +247,7 @@ curl -i -X PATCH "$CR_URL/v1/catch-records/$CATCH_RECORD_ID" \
 
 # speciesNotLanded — a root-level, trip-wide array (not tied to any gear).
 curl -i -X PATCH "$CR_URL/v1/catch-records/$CATCH_RECORD_ID" \
-  -H "Authorization: $TOKEN" \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -H "If-Match: $VERSION" \
   -d "{
@@ -261,7 +273,7 @@ Also requires `If-Match`.
 
 ```bash
 curl -i -X PUT "$CR_URL/v1/catch-records/$CATCH_RECORD_ID" \
-  -H "Authorization: $TOKEN" \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -H "If-Match: $VERSION" \
   -d "{
@@ -292,41 +304,34 @@ curl -i -X PUT "$CR_URL/v1/catch-records/$CATCH_RECORD_ID" \
 # Submit — generates the immutable JSON snapshot and PDF receipt. Requires If-Match;
 # Idempotency-Key is optional (safe to replay with the same key).
 curl -i -X POST "$CR_URL/v1/catch-records/$CATCH_RECORD_ID/submission" \
-  -H "Authorization: $TOKEN" \
+  -H "Authorization: Bearer $TOKEN" \
   -H "If-Match: $VERSION" \
   -H "Idempotency-Key: $(uuidgen)"
 
 # List every submission version's artifact metadata (no artifact body)
 curl -i "$CR_URL/v1/catch-records/$CATCH_RECORD_ID/submissions" \
-  -H "Authorization: $TOKEN"
+  -H "Authorization: Bearer $TOKEN"
 
 # Retrieve one immutable artifact body (artifactType is "json" or "pdf") as an attachment download
 curl -i "$CR_URL/v1/catch-records/$CATCH_RECORD_ID/submissions/1/json" \
-  -H "Authorization: $TOKEN" \
+  -H "Authorization: Bearer $TOKEN" \
   -o snapshot.json
 
 curl -i "$CR_URL/v1/catch-records/$CATCH_RECORD_ID/submissions/1/pdf" \
-  -H "Authorization: $TOKEN" \
+  -H "Authorization: Bearer $TOKEN" \
   -o receipt.pdf
-
-# Restricted-permission transition SUBMITTED -> COMPLETE. Requires a caller whose authenticated
-# permissions include catch-recording.complete. Requires If-Match; Idempotency-Key is optional.
-curl -i -X POST "$CR_URL/v1/catch-records/$CATCH_RECORD_ID/completion" \
-  -H "Authorization: $TOKEN" \
-  -H "If-Match: $VERSION" \
-  -H "Idempotency-Key: $(uuidgen)"
 
 # Start an in-place amendment (SUBMITTED/COMPLETE -> DRAFT). Requires If-Match; Idempotency-Key is
 # optional. Amendment saves reuse the PATCH route above; resubmission reuses the POST .../submission
 # route above.
 curl -i -X POST "$CR_URL/v1/catch-records/$CATCH_RECORD_ID/edit-start" \
-  -H "Authorization: $TOKEN" \
+  -H "Authorization: Bearer $TOKEN" \
   -H "If-Match: $VERSION" \
   -H "Idempotency-Key: $(uuidgen)"
 
 # Abandon an eligible, never-submitted DRAFT. Requires If-Match. Returns 204, idempotent.
 curl -i -X DELETE "$CR_URL/v1/catch-records/$CATCH_RECORD_ID" \
-  -H "Authorization: $TOKEN" \
+  -H "Authorization: Bearer $TOKEN" \
   -H "If-Match: $VERSION"
 ```
 
@@ -338,54 +343,54 @@ Source: `src/routes/vessel-profiles.js`. Full contract:
 ```bash
 # Favourite gears — list returns { vesselId, favouriteGearIds } (empty array until something is added)
 curl -i "$CR_URL/v1/vessels/$VESSEL_ID/favourite-gears" \
-  -H "Authorization: $TOKEN"
+  -H "Authorization: Bearer $TOKEN"
 
 # Add a favourite gear (gearId must be a valid, active gear in the Reference Data Service)
 curl -i -X POST "$CR_URL/v1/vessels/$VESSEL_ID/favourite-gears" \
-  -H "Authorization: $TOKEN" \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d "{\"gearId\": \"$GEAR_ID\"}"
 
 # Remove it again (safe to repeat)
 curl -i -X DELETE "$CR_URL/v1/vessels/$VESSEL_ID/favourite-gears/$GEAR_ID" \
-  -H "Authorization: $TOKEN"
+  -H "Authorization: Bearer $TOKEN"
 
 # Favourite species — same list/add/remove shape, keyed on speciesId
 curl -i "$CR_URL/v1/vessels/$VESSEL_ID/favourite-species" \
-  -H "Authorization: $TOKEN"
+  -H "Authorization: Bearer $TOKEN"
 
 curl -i -X POST "$CR_URL/v1/vessels/$VESSEL_ID/favourite-species" \
-  -H "Authorization: $TOKEN" \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d "{\"speciesId\": \"$SPECIES_ID\"}"
 
 curl -i -X DELETE "$CR_URL/v1/vessels/$VESSEL_ID/favourite-species/$SPECIES_ID" \
-  -H "Authorization: $TOKEN"
+  -H "Authorization: Bearer $TOKEN"
 
 # Favourite ports — same list/add/remove shape, keyed on portId
 curl -i "$CR_URL/v1/vessels/$VESSEL_ID/favourite-ports" \
-  -H "Authorization: $TOKEN"
+  -H "Authorization: Bearer $TOKEN"
 
 curl -i -X POST "$CR_URL/v1/vessels/$VESSEL_ID/favourite-ports" \
-  -H "Authorization: $TOKEN" \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d "{\"portId\": \"$PORT_ID\"}"
 
 curl -i -X DELETE "$CR_URL/v1/vessels/$VESSEL_ID/favourite-ports/$PORT_ID" \
-  -H "Authorization: $TOKEN"
+  -H "Authorization: Bearer $TOKEN"
 
 # Vessel-owned skippers — name is required; phoneNumber/email are each optional
 curl -i "$CR_URL/v1/vessels/$VESSEL_ID/skippers" \
-  -H "Authorization: $TOKEN"
+  -H "Authorization: Bearer $TOKEN"
 
 curl -i -X POST "$CR_URL/v1/vessels/$VESSEL_ID/skippers" \
-  -H "Authorization: $TOKEN" \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"name": "Jane Doe", "phoneNumber": "01234 567890", "email": "jane.doe@example.com"}'
 
 # -> capture the returned skipper's "id" as SKIPPER_ID
 curl -i -X DELETE "$CR_URL/v1/vessels/$VESSEL_ID/skippers/<SKIPPER_ID>" \
-  -H "Authorization: $TOKEN"
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 See [`docs/catch-recording-vessel-profiles.md`](./catch-recording-vessel-profiles.md) and
@@ -393,10 +398,10 @@ See [`docs/catch-recording-vessel-profiles.md`](./catch-recording-vessel-profile
 
 ## Troubleshooting
 
-| Symptom                                                               | Likely cause                                                                     | Check                                                                                                                                                                 |
-| --------------------------------------------------------------------- | -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `curl: (7) Failed to connect to ...` / `$CR_URL` unreachable          | The container isn't up yet, or failed to start, or `$CR_URL` is unset/wrong      | `docker compose ps`, `docker compose logs mmo-cr-catch-recording-service`, `echo $CR_URL`                                                                             |
-| `401 AUTHENTICATION_REQUIRED` on every `/v1/...` call                 | `AUTHENTICATION_SERVICE_URL` is unset or unreachable                             | Confirm your override file is applied (`docker compose config` shows the merged environment) and the target service is reachable from inside the `cdp-tenant` network |
-| `503 DEPENDENCY_UNAVAILABLE` on draft creation or favourite endpoints | `REFERENCE_DATA_SERVICE_URL`/`REFERENCE_DATA_SERVICE_TOKEN` unset or unreachable | Same as above, for the Reference Data Service                                                                                                                         |
-| Artifact/submission errors                                            | The floci S3 emulator isn't healthy yet                                          | `docker compose ps` — the application container has a `depends_on: floci: condition: service_healthy` dependency, so this should be rare                              |
-| MongoDB connection errors                                             | MongoDB container not yet accepting connections                                  | `docker compose logs mongodb`                                                                                                                                         |
+| Symptom                                                               | Likely cause                                                                                                        | Check                                                                                                                                                                 |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `curl: (7) Failed to connect to ...` / `$CR_URL` unreachable          | The container isn't up yet, or failed to start, or `$CR_URL` is unset/wrong                                         | `docker compose ps`, `docker compose logs mmo-cr-catch-recording-service`, `echo $CR_URL`                                                                             |
+| `401 AUTHENTICATION_REQUIRED` on every `/v1/...` call                 | The `ENTRA_*` settings are unset, or the token is not a valid Entra access token for the configured issuer/audience | Confirm your override file is applied (`docker compose config` shows the merged environment) and the target service is reachable from inside the `cdp-tenant` network |
+| `503 DEPENDENCY_UNAVAILABLE` on draft creation or favourite endpoints | `REFERENCE_DATA_SERVICE_URL`/`REFERENCE_DATA_SERVICE_TOKEN` unset or unreachable                                    | Same as above, for the Reference Data Service                                                                                                                         |
+| Artifact/submission errors                                            | The floci S3 emulator isn't healthy yet                                                                             | `docker compose ps` — the application container has a `depends_on: floci: condition: service_healthy` dependency, so this should be rare                              |
+| MongoDB connection errors                                             | MongoDB container not yet accepting connections                                                                     | `docker compose logs mongodb`                                                                                                                                         |

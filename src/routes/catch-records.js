@@ -15,14 +15,13 @@ import { getCatchRecordHistory } from '#/catch-recording/controller/catch-record
 import { submitCatchRecord } from '#/catch-recording/controller/submit-catch-record.js'
 import { listSubmissionArtifacts } from '#/catch-recording/controller/list-submission-artifacts.js'
 import { retrieveSubmissionArtifact } from '#/catch-recording/controller/retrieve-submission-artifact.js'
-import { completeCatchRecord } from '#/catch-recording/controller/complete-catch-record.js'
+import { Capability } from '#/authorization/capabilities.js'
+import { protectedRoute } from '#/authorization/protected-route.js'
 import { startCatchRecordEdit } from '#/catch-recording/controller/start-catch-record-edit.js'
 import { MAX_IDEMPOTENCY_KEY_LENGTH } from '#/catch-recording/persistence/idempotency-key.js'
 import { PERSISTED_STATUSES } from '#/catch-recording/domain/lifecycle-status.js'
 import { CATCH_RECORD_REFERENCE_PATTERN } from '#/catch-recording/domain/catch-record-reference.js'
 import { PUBLIC_ARTIFACT_TYPES } from '#/catch-recording/artifact/artifact-keys.js'
-
-const AUTH_STRATEGY = 'authentication-service'
 
 const HTTP_STATUS_OK = 200
 const HTTP_STATUS_CREATED = 201
@@ -275,22 +274,8 @@ async function retrieveSubmissionArtifactHandler(request, h) {
     .code(HTTP_STATUS_OK)
 }
 
-// Step 36: reuses the identical expected-version + optional-idempotency-key header shape as
-// submission - no new header contract is introduced.
-async function completeCatchRecordHandler(request, h) {
-  const response = await completeCatchRecord({
-    db: request.db,
-    authenticationContext: request.auth.credentials,
-    catchRecordId: request.params.catchRecordId,
-    expectedVersion: Number(request.headers['if-match']),
-    idempotencyKey: request.headers['idempotency-key']
-  })
-
-  return h.response(response).code(HTTP_STATUS_OK)
-}
-
 // Step 37: reuses the identical expected-version + optional-idempotency-key header shape as
-// submission/completion - no new header contract is introduced.
+// submission - no new header contract is introduced.
 async function startCatchRecordEditHandler(request, h) {
   const response = await startCatchRecordEdit({
     db: request.db,
@@ -306,8 +291,8 @@ async function startCatchRecordEditHandler(request, h) {
 /**
  * Step 17/18/19/20/21/28: `GET`/`POST`/`DELETE`/`PATCH /v1/catch-records[/{catchRecordId}]`.
  *
- * Thin handlers only: Joi validates the transport shape, every route requires the trusted
- * `authentication-service` strategy, and all business orchestration lives in the dedicated controller
+ * Thin handlers only: Joi validates the transport shape, every route is `protectedRoute`-declared
+ * (Entra authentication plus exactly one approved capability, enforced before validation), and all business orchestration lives in the dedicated controller
  * modules under `src/catch-recording/controller/`.
  */
 export const catchRecords = [
@@ -315,7 +300,7 @@ export const catchRecords = [
     method: 'GET',
     path: '/v1/catch-records',
     options: {
-      auth: AUTH_STRATEGY,
+      ...protectedRoute({ capability: Capability.READ }),
       validate: {
         query: listCatchRecordsQuerySchema
       }
@@ -326,7 +311,7 @@ export const catchRecords = [
     method: 'POST',
     path: '/v1/catch-records',
     options: {
-      auth: AUTH_STRATEGY,
+      ...protectedRoute({ capability: Capability.CREATE }),
       validate: {
         headers: createDraftHeadersSchema,
         payload: createDraftPayloadSchema
@@ -338,7 +323,7 @@ export const catchRecords = [
     method: 'GET',
     path: CATCH_RECORD_PATH,
     options: {
-      auth: AUTH_STRATEGY,
+      ...protectedRoute({ capability: Capability.READ }),
       validate: {
         params: catchRecordIdParamsSchema
       }
@@ -349,7 +334,7 @@ export const catchRecords = [
     method: 'PUT',
     path: CATCH_RECORD_PATH,
     options: {
-      auth: AUTH_STRATEGY,
+      ...protectedRoute({ capability: Capability.UPDATE }),
       payload: { maxBytes: MAX_COMPLETE_REPLACEMENT_PAYLOAD_BYTES },
       validate: {
         params: catchRecordIdParamsSchema,
@@ -363,7 +348,7 @@ export const catchRecords = [
     method: 'GET',
     path: `${CATCH_RECORD_PATH}/history`,
     options: {
-      auth: AUTH_STRATEGY,
+      ...protectedRoute({ capability: Capability.READ }),
       validate: {
         params: catchRecordIdParamsSchema,
         query: catchRecordHistoryQuerySchema
@@ -375,7 +360,7 @@ export const catchRecords = [
     method: 'DELETE',
     path: CATCH_RECORD_PATH,
     options: {
-      auth: AUTH_STRATEGY,
+      ...protectedRoute({ capability: Capability.UPDATE }),
       validate: {
         params: catchRecordIdParamsSchema,
         headers: expectedVersionHeadersSchema
@@ -387,7 +372,7 @@ export const catchRecords = [
     method: 'PATCH',
     path: CATCH_RECORD_PATH,
     options: {
-      auth: AUTH_STRATEGY,
+      ...protectedRoute({ capability: Capability.UPDATE }),
       validate: {
         params: catchRecordIdParamsSchema,
         headers: expectedVersionHeadersSchema,
@@ -400,7 +385,7 @@ export const catchRecords = [
     method: 'POST',
     path: `${CATCH_RECORD_PATH}/submission`,
     options: {
-      auth: AUTH_STRATEGY,
+      ...protectedRoute({ capability: Capability.SUBMIT }),
       validate: {
         params: catchRecordIdParamsSchema,
         headers: submissionHeadersSchema
@@ -412,7 +397,7 @@ export const catchRecords = [
     method: 'GET',
     path: `${CATCH_RECORD_PATH}/submissions`,
     options: {
-      auth: AUTH_STRATEGY,
+      ...protectedRoute({ capability: Capability.READ }),
       validate: {
         params: catchRecordIdParamsSchema
       }
@@ -423,7 +408,7 @@ export const catchRecords = [
     method: 'GET',
     path: `${CATCH_RECORD_PATH}/submissions/{submissionNumber}/{artifactType}`,
     options: {
-      auth: AUTH_STRATEGY,
+      ...protectedRoute({ capability: Capability.READ }),
       validate: {
         params: submissionArtifactParamsSchema
       }
@@ -432,21 +417,9 @@ export const catchRecords = [
   },
   {
     method: 'POST',
-    path: `${CATCH_RECORD_PATH}/completion`,
-    options: {
-      auth: AUTH_STRATEGY,
-      validate: {
-        params: catchRecordIdParamsSchema,
-        headers: submissionHeadersSchema
-      }
-    },
-    handler: completeCatchRecordHandler
-  },
-  {
-    method: 'POST',
     path: `${CATCH_RECORD_PATH}/edit-start`,
     options: {
-      auth: AUTH_STRATEGY,
+      ...protectedRoute({ capability: Capability.AMEND }),
       validate: {
         params: catchRecordIdParamsSchema,
         headers: submissionHeadersSchema

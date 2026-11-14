@@ -85,6 +85,10 @@ it.
 
 ### Trusted authentication (Step 13)
 
+> **Superseded and removed.** The Authentication Service based flow described here was replaced by Microsoft
+> Entra External ID token validation and User Profile Service capability authorization (see
+> [`entra-authentication.md`](./entra-authentication.md)). The `authentication.*` settings no longer exist.
+
 The Authorisation Service does not yet have a confirmed real contract; a mock instance
 (`mmo-cr-authentication-service`) currently authorises every request. Catch Recording integrates against
 its real (mocked) HTTP contract directly, mirroring the already-implemented client in
@@ -468,6 +472,11 @@ production traffic yet, documented here as decisions rather than invented silent
 
 ### Step 36: restricted completion
 
+> **Removed.** The `POST /v1/catch-records/{catchRecordId}/completion` endpoint, its controller and its
+> scope-based `completion-policy.js` were removed as deprecated (Entra Step 10, on the product owner's
+> instruction). The decisions below are retained only as history; `applyCompletion` and
+> `findCatchRecordById` remain in the persistence layer with no caller.
+
 - **Completion permission**: already resolved before Phase 8 — the exact `catch-recording.complete`
   scope (`completion-policy.js`, confirmed in `docs/catch-recording-authorisation.md`'s Phase 4
   decisions). No new permission name is invented.
@@ -547,6 +556,57 @@ remained unresolved until now. Resolved with the user as follows:
   effect is letting a retried favourite-add skip a redundant Reference Data Service lookup.
 - **Authentication**: out of scope for this phase's decisions — the existing mock Authentication Service
   (Step 13) already trusts/authorises every request; Step 39 introduces no new authentication mechanics.
+
+## Entra External ID and authorization configuration (Entra Step 01)
+
+> Configuration contracts only. The runtime does **not** yet validate Entra tokens, call the User Profile
+> Service or evaluate capabilities — those are later Entra implementation steps. The existing
+> The legacy Authentication Service flow has since been removed.
+
+Defined in `src/config.js`; validated at startup by
+`src/common/helpers/convict/validate-entra-authorization-config.js`. Error messages name the invalid field
+and never echo configured values.
+
+| Property                                                | Environment variable                                         | Required | Unit / notes                                                                                             |
+| ------------------------------------------------------- | ------------------------------------------------------------ | -------- | -------------------------------------------------------------------------------------------------------- |
+| `entra.issuer`                                          | `ENTRA_ISSUER`                                               | Yes      | Exact expected `iss`; absolute URL; wildcards rejected                                                   |
+| `entra.audience`                                        | `ENTRA_AUDIENCE`                                             | Yes      | Exact expected `aud`; wildcards rejected                                                                 |
+| `entra.oidcMetadataUrl`                                 | `ENTRA_OIDC_METADATA_URL`                                    | Yes      | Absolute URL of the OIDC discovery document                                                              |
+| `entra.allowedAlgorithms`                               | `ENTRA_ALLOWED_ALGORITHMS`                                   | No       | Comma-separated allow-list; default and only supported value `RS256`                                     |
+| `entra.userIdClaim`                                     | `ENTRA_USER_ID_CLAIM`                                        | Yes      | Single claim name (for example `oid`); no fallback claim                                                 |
+| `entra.metadataRefreshIntervalSeconds`                  | `ENTRA_METADATA_REFRESH_INTERVAL_SECONDS`                    | Yes      | Seconds; normal metadata/JWKS refresh policy                                                             |
+| `entra.minimumRefreshIntervalSeconds`                   | `ENTRA_MINIMUM_REFRESH_INTERVAL_SECONDS`                     | Yes      | Seconds; minimum gap between refresh attempts; must not exceed the refresh interval                      |
+| `entra.requestTimeoutMs`                                | `ENTRA_REQUEST_TIMEOUT_MS`                                   | Yes      | Milliseconds; OIDC metadata and JWKS requests                                                            |
+| `authorization.serviceId`                               | `AUTHORIZATION_SERVICE_ID`                                   | No       | Default `catch-recording`; lower-case kebab-case                                                         |
+| `authorization.userRolesUrlTemplate`                    | `AUTHORIZATION_USER_ROLES_URL_TEMPLATE`                      | Yes      | Must contain `{entraObjectId}` exactly once, in the URL path                                             |
+| `authorization.roleDefinitionsUrl`                      | `AUTHORIZATION_ROLE_DEFINITIONS_URL`                         | Yes      | Must end with `/roles-definitions/services/<serviceId>`                                                  |
+| `authorization.userRoleCacheTtlSeconds`                 | `AUTHORIZATION_USER_ROLE_CACHE_TTL_SECONDS`                  | No       | Seconds; default `300` (approved initial value); an expired entry is never used                          |
+| `authorization.userRoleCacheMaximumEntries`             | `AUTHORIZATION_USER_ROLE_CACHE_MAXIMUM_ENTRIES`              | Yes      | Entries; bounds the user-role cache                                                                      |
+| `authorization.roleDefinitionsCacheTtlSeconds`          | `AUTHORIZATION_ROLE_DEFINITIONS_CACHE_TTL_SECONDS`           | Yes      | Seconds a snapshot is fresh                                                                              |
+| `authorization.roleDefinitionsCacheMaximumStaleSeconds` | `AUTHORIZATION_ROLE_DEFINITIONS_CACHE_MAXIMUM_STALE_SECONDS` | Yes      | Seconds of **additional** use after the snapshot stops being fresh (total usable age = TTL + this value) |
+| `authorization.userProfileRequestTimeoutMs`             | `USER_PROFILE_SERVICE_TIMEOUT_MS`                            | No       | Milliseconds; default `2000` (mirrors the existing HTTP client policy)                                   |
+| `authorization.userProfileRetryCount`                   | `USER_PROFILE_SERVICE_RETRY_COUNT`                           | No       | Bounded transient (502/503/504) retries; default `1`; `0` disables retries                               |
+| `authorization.userProfileRetryDelayMs`                 | `USER_PROFILE_SERVICE_RETRY_DELAY_MS`                        | No       | Milliseconds between retries; default `100`                                                              |
+
+Decisions recorded:
+
+- **No insecure defaults.** Issuer, audience, metadata URL, user-identifier claim, both User Profile Service
+  URLs and every unapproved numeric value (cache size, role-definition TTL/maximum stale, refresh
+  controls) have no default outside tests. `NODE_ENV=test` supplies clearly synthetic `.invalid` values so
+  tests start with a complete configuration.
+- **Fail fast.** Startup fails when the group is incomplete or invalid in any non-local runtime
+  (`ENVIRONMENT` other than `local`, or `NODE_ENV=production`), and when a local runtime sets only part of
+  the group. A fully unset group is tolerated only for local development, preserving the existing
+  convention that local startup is not blocked while the runtime does not yet depend on these values.
+- **HTTPS.** URLs must be `https` (no embedded credentials or fragments); `http` is accepted only for a
+  local runtime.
+- **Maximum stale semantics.** `roleDefinitionsCacheMaximumStaleSeconds` is the extra window _after_ the
+  TTL, not a total age. Both must be positive integers. The user-role cache has no stale window.
+- Initial values for the approved-but-unspecified numbers (cache size, role-definition TTL/maximum stale,
+  refresh intervals) must be supplied by the Identity/DevOps owners per environment; `.env.sample` values
+  are illustrative only.
+- The mock User Profile Service needs no authentication at this stage; production service-to-service
+  authentication remains a future production concern.
 
 ## Security and privacy
 
