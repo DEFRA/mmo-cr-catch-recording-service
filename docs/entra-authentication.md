@@ -808,3 +808,95 @@ Never log or share tokens, signing keys, user identifiers, role assignments or d
 - Commands: `npm test` (all tests with coverage), `npx vitest run src/integration` (integrated suite),
   `npm run lint`, `npm run format:check`, `npm run openapi:lint`, `npm run security-audit`,
   `npm run git:pre-commit-hook` (full gate).
+
+### Manual testing against Entra
+
+The service makes exactly **two** outbound calls to Entra. Both are anonymous `GET` requests (no token, no
+client secret, no cookies) sent with `Accept: application/json`, a timeout of `ENTRA_REQUEST_TIMEOUT_MS`, and
+redirects not followed (a redirect is treated as a failure):
+
+1. **OIDC discovery document** from `ENTRA_OIDC_METADATA_URL` (limit 64 KiB).
+2. **JWKS (signing keys)** from the `jwks_uri` found in that document (limit 256 KiB, 20 keys).
+
+They run lazily on the first token lookup, again when the snapshot is older than
+`ENTRA_METADATA_REFRESH_INTERVAL_SECONDS`, and once more when a token carries an unknown `kid` (at most one
+attempt per `ENTRA_MINIMUM_REFRESH_INTERVAL_SECONDS`). The service never calls the token or authorize
+endpoints: the UI obtains the token, and the service only verifies it locally using these keys.
+
+Replace the placeholders with the real values (the same variables the service uses; see
+[Configuration reference](#configuration-reference)). Do not commit real values.
+
+```bash
+export ENTRA_ISSUER='<expected-iss-claim>'
+export ENTRA_OIDC_METADATA_URL='<oidc-metadata-url>'
+export ENTRA_REQUEST_TIMEOUT_MS='<timeout-ms>'   # only used here for --max-time
+```
+
+**1. Discovery document**
+
+```bash
+curl -sS --fail-with-body --max-time "$((ENTRA_REQUEST_TIMEOUT_MS / 1000 + 1))" \
+  -H 'Accept: application/json' \
+  "$ENTRA_OIDC_METADATA_URL" -o /tmp/entra-metadata.json
+
+jq '{issuer, jwks_uri}' /tmp/entra-metadata.json
+
+# The service requires an exact match with ENTRA_ISSUER (no trailing slash or case difference)
+[ "$(jq -r .issuer /tmp/entra-metadata.json)" = "$ENTRA_ISSUER" ] \
+  && echo 'issuer OK' || echo 'issuer MISMATCH (service reports METADATA_ISSUER_MISMATCH, every token gets 401)'
+```
+
+Expected: HTTP 200, a JSON body whose `issuer` equals `ENTRA_ISSUER` and whose `jwks_uri` is an `https` URL.
+
+**2. JWKS (the "refresh the keys" call)**
+
+```bash
+export ENTRA_JWKS_URI=$(jq -r .jwks_uri /tmp/entra-metadata.json)
+
+curl -sS --fail-with-body --max-time "$((ENTRA_REQUEST_TIMEOUT_MS / 1000 + 1))" \
+  -H 'Accept: application/json' \
+  "$ENTRA_JWKS_URI" -o /tmp/entra-jwks.json
+
+jq '.keys | {count: length, keys: map({kid, kty, use, alg})}' /tmp/entra-jwks.json
+```
+
+Expected: HTTP 200 and at least one `RSA` key with a unique `kid`. Use `curl -i` to see the status and
+confirm there is no redirect (a `3xx` fails in the service).
+
+**3. (Optional) Check that your UI token matches this configuration**
+
+Get the access token from the UI session and decode only its header and payload locally (never in an online
+decoder, and never share or log it):
+
+```bash
+export ACCESS_TOKEN='<access-token-from-the-ui>'
+
+node -e '
+const [h, p] = process.argv[1].split(".").slice(0, 2).map(s => JSON.parse(Buffer.from(s, "base64url")))
+console.log({ alg: h.alg, kid: h.kid, iss: p.iss, aud: p.aud, expiresInSeconds: p.exp - Math.floor(Date.now() / 1000) })
+' "$ACCESS_TOKEN"
+
+# The token's kid must be one of the keys published by Entra
+jq -r '.keys[].kid' /tmp/entra-jwks.json
+```
+
+Expected: `alg` is `RS256`, `kid` is in the JWKS list, `iss` equals `ENTRA_ISSUER`, `aud` equals
+`ENTRA_AUDIENCE`, and the token has not expired. A different `iss` or `aud` produces `401` from the service.
+
+**4. Call the service with the token**
+
+```bash
+export SERVICE_URL='http://localhost:3001'
+
+curl -sS -i -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+  -H "x-cdp-request-id: manual-entra-test-$(date +%s)" "$SERVICE_URL/v1/catch-records"
+```
+
+`200` or `403` means the token was accepted by the Entra checks (`403` is a role decision). `401` means
+rejection by the token or key checks; `503` is the User Profile Service, not Entra. Find the request in the
+service logs with the `x-cdp-request-id` value (see the [Runbook](#runbook)).
+
+```bash
+unset ACCESS_TOKEN
+rm -f /tmp/entra-metadata.json /tmp/entra-jwks.json
+```
