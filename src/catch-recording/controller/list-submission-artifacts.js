@@ -65,7 +65,7 @@ function groupCommittedSubmissions(artifacts) {
 /**
  * @param {Object} input
  * @param {import('mongodb').Db} input.db
- * @param {{ userId: string, scopes: ReadonlyArray<string> }} input.authenticationContext
+ * @param {{ userId: string }} input.authenticationContext
  * @param {string} input.catchRecordId
  * @returns {Promise<Readonly<{ catchRecordId: string, count: number, submissions: Array<object> }>>}
  * @throws {ApplicationError} `RESOURCE_NOT_FOUND` when the record does not exist for this owner

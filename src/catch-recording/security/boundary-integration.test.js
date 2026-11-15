@@ -3,7 +3,6 @@ import Boom from '@hapi/boom'
 
 import { errorMapping } from '#/plugins/error-mapping.js'
 import { failAction } from '#/common/helpers/fail-action.js'
-import { createAuthenticationContext } from '#/catch-recording/controller/authentication-context.js'
 import { decideReadAccess } from './resource-access-policy.js'
 import { enforcePolicyOutcome } from './policy-errors.js'
 
@@ -24,10 +23,10 @@ async function createTestServer() {
       method: 'GET',
       path: '/catch-records/{id}',
       handler: (request) => {
-        const authenticationContext = createAuthenticationContext({
-          actorId: request.headers['x-test-actor-id'],
-          permissions: []
-        })
+        const actorId = request.headers['x-test-actor-id']
+        const authenticationContext = actorId
+          ? Object.freeze({ userId: actorId })
+          : undefined
         const record = RECORDS[request.params.id]
 
         enforcePolicyOutcome(

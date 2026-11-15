@@ -80,8 +80,8 @@ Source: `package.json` (`"imports": { "#/*": "./src/*" }`), the file tree above.
 - Existing keys: `serviceVersion`, `host`, `port`, `serviceName`, `cdpEnvironment` (enum including
   `local`), `log.isEnabled`/`log.level`/`log.format`/`log.redact`, `mongo.mongoUrl`/
   `mongo.databaseName`/`mongo.mongoOptions.retryWrites`/`mongo.mongoOptions.readPreference`,
-  `httpProxy`, `tracing.header`, `authentication.baseUrl`/`authentication.timeoutMs`/
-  `authentication.retryCount`/`authentication.retryDelayMs` (Step 13 Authentication Service client),
+  `httpProxy`, `tracing.header`, `entra.*` and `authorization.*` (Entra token validation and User Profile Service authorization; the
+  legacy `authentication.*` Authentication Service settings were removed),
   `referenceData.baseUrl`/`referenceData.serviceToken`/`referenceData.timeoutMs`/
   `referenceData.retryCount`/`referenceData.retryDelayMs` (Step 15 Reference Data Service client)
   (`src/config.js`).

@@ -53,8 +53,8 @@ The Catch Recording Service persists data in exactly two places:
   approved **display snapshot** (fields explicitly suffixed `Snapshot`, e.g. `nameSnapshot`,
   `codeSnapshot`, `rssSnapshot`) onto the catch record at write time. The snapshot is a point-in-time
   display copy, never a second authoritative source, and is never re-resolved or re-validated afterwards.
-- **Authenticated identity** (accounts, users, sessions, tokens) is owned entirely by the external
-  **Authentication Service**. See [Accounts and authenticated identities](#accounts-and-authenticated-identities).
+- **Authenticated identity** (accounts, users, sessions, tokens) is owned entirely outside this service
+  (Microsoft Entra External ID; roles by the User Profile Service). See [Accounts and authenticated identities](#accounts-and-authenticated-identities).
 - **Redis** appears only as local development infrastructure (`compose.yml`'s `redis` service). There is
   no Redis client import, configuration key, or call anywhere in `src/`. It is not used as an application
   cache, session store, or persistence layer by this service — the approved architecture has no
@@ -596,12 +596,13 @@ profiles.js`); the ID is additionally resolved and must be active/selectable in 
 own.** There is no MongoDB collection anywhere in the codebase for accounts, users, credentials, sessions,
 or tokens.
 
-Authenticated identity is resolved **per-request** from the external **Authentication Service**:
+Authenticated identity is resolved **per-request** from a signed Microsoft Entra External ID access token
+(see [`entra-authentication.md`](./entra-authentication.md)):
 
-1. `authentication-scheme.js` reads the inbound `Authorization` bearer token.
-2. `authentication-client.js` calls `POST {authentication.baseUrl}/validate` on the external service.
-3. `authentication-context.js` builds a small, frozen, **transient, in-memory** context —
-   `{ userId, scopes }` only — placed on `request.auth.credentials`. No raw token, claims, profile, or
+1. `entra-authentication-scheme.js` reads the inbound `Authorization` bearer token.
+2. `access-token-validator.js` validates it locally (signature, issuer, audience, algorithm, lifetime).
+3. `authenticated-user-context.js` builds a small, frozen, **transient, in-memory** context —
+   `{ userId }` only — placed on `request.auth.credentials`. No raw token, claims, profile, or
    session data is retained, and nothing here is written to MongoDB or any other store.
 
 **What this service _does_ persist** is the resulting external `userId` value, as a plain reference field
@@ -869,7 +870,7 @@ erDiagram
         string externalEntity "vessels, gears, species, ports, statistical areas — owned elsewhere"
     }
     AUTHENTICATION_SERVICE {
-        string externalIdentity "userId, scopes — owned elsewhere, never persisted locally"
+        string externalIdentity "userId — owned elsewhere, never persisted locally"
     }
 ```
 
@@ -967,13 +968,9 @@ retention in S3 — both are owner decisions, not implemented defaults.
    commits MongoDB metadata afterwards as a separate step — the two systems are not one distributed
    transaction, and a mid-sequence failure can leave an orphaned S3 object. This document states the
    distinction explicitly; the existing document could usefully be updated to do the same.
-2. **Authentication documentation may be stale.** [`catch-recording-authentication.md`](./catch-recording-authentication.md)
-   describes the Authentication Service integration as "currently a mock, always-allow implementation" and
-   states "no business route is enforced". The current code performs a real HTTP `POST .../validate` call
-   with bounded retry/timeout/response-shape validation, and routes (`src/routes/catch-records.js`,
-   `src/routes/vessel-profiles.js`) do require the `authentication-service` strategy. This may be accurate
-   for a specific deployed environment's Authentication Service endpoint, but is misleading if read as a
-   description of the current service code.
+2. **Authentication documentation was stale (resolved).** The Authentication Service flow was removed; see
+   [`entra-authentication.md`](./entra-authentication.md) for the current Entra bearer-token and capability
+   authorization design.
 3. **No index backs the optional `status` filter on listing.** `listCatchRecordsByOwner` accepts an
    optional `status` filter, but the only manually created list index is
    `{ ownerUserId: 1, createdAt: -1, _id: 1 }` (no `status` field). A status-filtered list query is served

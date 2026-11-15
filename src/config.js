@@ -2,12 +2,21 @@ import convict from 'convict'
 import convictFormatWithValidator from 'convict-format-with-validator'
 
 import { convictValidateMongoUri } from '#/common/helpers/convict/validate-mongo-uri.js'
+import { validateEntraAuthorizationConfig } from '#/common/helpers/convict/validate-entra-authorization-config.js'
 
 convict.addFormat(convictValidateMongoUri)
 convict.addFormats(convictFormatWithValidator)
 
 const isProduction = process.env.NODE_ENV === 'production'
 const isTest = process.env.NODE_ENV === 'test'
+
+// Non-production, clearly synthetic values so tests start with a complete, internally consistent
+// configuration. Outside tests, every trust-boundary value has no default and must be supplied.
+const testValue = (value) => (isTest ? value : null)
+
+const TEST_METADATA_REFRESH_INTERVAL_SECONDS = 3600
+const TEST_REQUEST_TIMEOUT_MS = 2000
+const TEST_DEFINITIONS_MAXIMUM_STALE_SECONDS = 300
 
 export const config = convict({
   serviceVersion: {
@@ -133,31 +142,134 @@ export const config = convict({
     default: 'Europe/London',
     env: 'BUSINESS_TIMEZONE'
   },
-  authentication: {
-    baseUrl: {
-      doc: 'Base URL of the Authentication Service used to validate trusted caller bearer tokens',
+  entra: {
+    issuer: {
+      doc: 'Exact expected Entra External ID access-token issuer (the `iss` claim). Wildcards are rejected.',
       format: String,
       nullable: true,
-      default: null,
-      env: 'AUTHENTICATION_SERVICE_URL'
+      default: testValue('https://login.entra.test.invalid/test-tenant/v2.0'),
+      env: 'ENTRA_ISSUER'
     },
-    timeoutMs: {
-      doc: 'Timeout in milliseconds for Authentication Service token-validation requests',
+    audience: {
+      doc: 'Exact expected access-token audience (the `aud` claim) identifying the Catch Recording API. Wildcards are rejected.',
+      format: String,
+      nullable: true,
+      default: testValue('api://catch-recording-test'),
+      env: 'ENTRA_AUDIENCE'
+    },
+    oidcMetadataUrl: {
+      doc: 'OpenID Connect metadata (discovery) document URL, the only source of the `jwks_uri`',
+      format: String,
+      nullable: true,
+      default: testValue(
+        'https://login.entra.test.invalid/test-tenant/v2.0/.well-known/openid-configuration'
+      ),
+      env: 'ENTRA_OIDC_METADATA_URL'
+    },
+    allowedAlgorithms: {
+      doc: 'Allow-list of accepted JWT signing algorithms (comma-separated in the environment). Only RS256 is supported.',
+      format: Array,
+      default: ['RS256'],
+      env: 'ENTRA_ALLOWED_ALGORITHMS'
+    },
+    userIdClaim: {
+      doc: 'Name of the approved stable user-identifier claim (for example `oid` or `sub`) used for User Profile Service lookup. Read only after full token validation.',
+      format: String,
+      nullable: true,
+      default: testValue('oid'),
+      env: 'ENTRA_USER_ID_CLAIM'
+    },
+    metadataRefreshIntervalSeconds: {
+      doc: 'Seconds after which cached OIDC metadata and signing keys are refreshed on the normal refresh policy',
+      format: 'nat',
+      nullable: true,
+      default: isTest ? TEST_METADATA_REFRESH_INTERVAL_SECONDS : null,
+      env: 'ENTRA_METADATA_REFRESH_INTERVAL_SECONDS'
+    },
+    minimumRefreshIntervalSeconds: {
+      doc: 'Minimum seconds between OIDC metadata/JWKS refresh attempts, preventing refresh storms (including unknown-`kid` refreshes)',
+      format: 'nat',
+      nullable: true,
+      default: isTest ? 60 : null,
+      env: 'ENTRA_MINIMUM_REFRESH_INTERVAL_SECONDS'
+    },
+    requestTimeoutMs: {
+      doc: 'Timeout in milliseconds for OIDC metadata and JWKS requests',
+      format: 'nat',
+      nullable: true,
+      default: isTest ? TEST_REQUEST_TIMEOUT_MS : null,
+      env: 'ENTRA_REQUEST_TIMEOUT_MS'
+    }
+  },
+  authorization: {
+    serviceId: {
+      doc: 'User Profile Service identifier of this service, used to select its role-to-capability definitions',
+      format: String,
+      default: 'catch-recording',
+      env: 'AUTHORIZATION_SERVICE_ID'
+    },
+    userRolesUrlTemplate: {
+      doc: 'User Profile Service user-roles URL template; must contain the {entraObjectId} placeholder once, in the path',
+      format: String,
+      nullable: true,
+      default: testValue(
+        'https://user-profile.test.invalid/users/{entraObjectId}/roles'
+      ),
+      env: 'AUTHORIZATION_USER_ROLES_URL_TEMPLATE'
+    },
+    roleDefinitionsUrl: {
+      doc: 'User Profile Service role-definitions URL for this service; must end with /roles-definitions/services/<serviceId>',
+      format: String,
+      nullable: true,
+      default: testValue(
+        'https://user-profile.test.invalid/roles-definitions/services/catch-recording'
+      ),
+      env: 'AUTHORIZATION_ROLE_DEFINITIONS_URL'
+    },
+    userRoleCacheTtlSeconds: {
+      doc: 'Seconds a validated user-role assignment may be cached. Initial approved value is 300; an expired entry is never used.',
+      format: 'nat',
+      default: 300,
+      env: 'AUTHORIZATION_USER_ROLE_CACHE_TTL_SECONDS'
+    },
+    userRoleCacheMaximumEntries: {
+      doc: 'Maximum number of users held in the bounded user-role cache',
+      format: 'nat',
+      nullable: true,
+      default: isTest ? 100 : null,
+      env: 'AUTHORIZATION_USER_ROLE_CACHE_MAXIMUM_ENTRIES'
+    },
+    roleDefinitionsCacheTtlSeconds: {
+      doc: 'Seconds a role-definitions snapshot is fresh; after this a refresh is required',
+      format: 'nat',
+      nullable: true,
+      default: isTest ? 60 : null,
+      env: 'AUTHORIZATION_ROLE_DEFINITIONS_CACHE_TTL_SECONDS'
+    },
+    roleDefinitionsCacheMaximumStaleSeconds: {
+      doc: 'Additional seconds, after the snapshot stops being fresh, during which the last validated snapshot may still be used when a refresh fails (total usable age is TTL plus this value)',
+      format: 'nat',
+      nullable: true,
+      default: isTest ? TEST_DEFINITIONS_MAXIMUM_STALE_SECONDS : null,
+      env: 'AUTHORIZATION_ROLE_DEFINITIONS_CACHE_MAXIMUM_STALE_SECONDS'
+    },
+    userProfileRequestTimeoutMs: {
+      doc: 'Timeout in milliseconds for User Profile Service requests',
       format: 'nat',
       default: 2000,
-      env: 'AUTHENTICATION_SERVICE_TIMEOUT_MS'
+      env: 'USER_PROFILE_SERVICE_TIMEOUT_MS'
     },
-    retryCount: {
-      doc: 'Number of bounded retries for approved transient (502/503/504) Authentication Service failures',
+    userProfileRetryCount: {
+      doc: 'Number of bounded retries for approved transient (502/503/504) User Profile Service failures',
       format: 'nat',
       default: 1,
-      env: 'AUTHENTICATION_SERVICE_RETRY_COUNT'
+      env: 'USER_PROFILE_SERVICE_RETRY_COUNT'
     },
-    retryDelayMs: {
-      doc: 'Delay in milliseconds between bounded Authentication Service retries',
+    userProfileRetryDelayMs: {
+      doc: 'Delay in milliseconds between bounded User Profile Service retries',
       format: 'nat',
       default: 100,
-      env: 'AUTHENTICATION_SERVICE_RETRY_DELAY_MS'
+      env: 'USER_PROFILE_SERVICE_RETRY_DELAY_MS'
     }
   },
   referenceData: {
@@ -231,3 +343,9 @@ export const config = convict({
 })
 
 config.validate({ allowed: 'strict' })
+
+// Local development is the only runtime allowed to run without, or with http, Entra/authorization URLs
+export const isLocalRuntime =
+  config.get('cdpEnvironment') === 'local' && !isProduction
+
+validateEntraAuthorizationConfig(config.get(), { isLocalRuntime })

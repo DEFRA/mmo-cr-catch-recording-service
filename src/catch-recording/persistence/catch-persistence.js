@@ -136,10 +136,9 @@ export async function findCatchRecordByReference(db, { catchRecordReference }) {
 
 /**
  * Trusted-internal, exact-match retrieval by canonical internal ID alone — **not** owner-scoped.
- * Reserved exclusively for Step 36's restricted completion, the one approved operation whose
- * authorisation is purely permission-gated rather than ownership-gated (`completion-policy.js`'s
- * `decideCompletionAccess` has no `ownerUserId` parameter by design). Must never be exposed directly to
- * an HTTP route or used by any ownership-scoped operation.
+ * Formerly reserved for the restricted completion endpoint, which has been removed as deprecated; this
+ * primitive currently has no caller. Must never be exposed directly to an HTTP route or used by any
+ * ownership-scoped operation.
  *
  * @param {import('mongodb').Db} db
  * @param {{ id: string }} params

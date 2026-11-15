@@ -42,7 +42,7 @@ DELETE /v1/vessels/{vesselId}/skippers/{skipperId}
 
 No skipper update endpoint exists (deferred — see `docs/configuration-decisions.md`).
 
-Every endpoint requires the trusted `authentication-service` strategy and enforces vessel-profile
+Every endpoint requires the Entra authentication strategy and a vessel-scoped `catch-record.read`/`catch-record.update` capability and enforces vessel-profile
 authorisation (`decideVesselProfileAccess`, reusing the Step 14 `decideVesselAccess` gate unchanged) —
 `accessibleVesselIds` comes from `referenceDataClient.listAccessibleVesselIds`, exactly as Step 18's draft
 creation already does.

@@ -250,7 +250,7 @@ async function resolveSectionValue({
  * @param {Object} input
  * @param {import('mongodb').Db} input.db
  * @param {object} input.referenceDataClient Step 15 Reference Data Service client
- * @param {{ userId: string, scopes: ReadonlyArray<string> }} input.authenticationContext
+ * @param {{ userId: string }} input.authenticationContext
  * @param {string} input.catchRecordId
  * @param {number} input.expectedVersion
  * @param {unknown} input.section the canonical section name (validated against `SECTION_ALLOW_LIST`)

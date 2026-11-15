@@ -18,8 +18,8 @@ import {
   removeSkipper
 } from '#/catch-recording/controller/vessel-skippers.js'
 import { MAX_IDEMPOTENCY_KEY_LENGTH } from '#/catch-recording/persistence/idempotency-key.js'
-
-const AUTH_STRATEGY = 'authentication-service'
+import { Capability } from '#/authorization/capabilities.js'
+import { protectedRoute } from '#/authorization/protected-route.js'
 
 const HTTP_STATUS_OK = 200
 const HTTP_STATUS_NO_CONTENT = 204
@@ -179,7 +179,10 @@ function buildFavouriteRoutes({ path, idField, list, add, remove }) {
       method: 'GET',
       path: collectionPath,
       options: {
-        auth: AUTH_STRATEGY,
+        ...protectedRoute({
+          capability: Capability.READ,
+          vesselIdParam: 'vesselId'
+        }),
         validate: { params: vesselIdParamsSchema }
       },
       handler: buildListHandler(list)
@@ -188,7 +191,10 @@ function buildFavouriteRoutes({ path, idField, list, add, remove }) {
       method: 'POST',
       path: collectionPath,
       options: {
-        auth: AUTH_STRATEGY,
+        ...protectedRoute({
+          capability: Capability.UPDATE,
+          vesselIdParam: 'vesselId'
+        }),
         validate: {
           params: vesselIdParamsSchema,
           headers: idempotencyHeadersSchema,
@@ -201,7 +207,10 @@ function buildFavouriteRoutes({ path, idField, list, add, remove }) {
       method: 'DELETE',
       path: itemPath,
       options: {
-        auth: AUTH_STRATEGY,
+        ...protectedRoute({
+          capability: Capability.UPDATE,
+          vesselIdParam: 'vesselId'
+        }),
         validate: { params: favouriteIdParamsSchema(idField) }
       },
       handler: buildRemoveFavouriteHandler(remove, idField)
@@ -215,7 +224,7 @@ function buildFavouriteRoutes({ path, idField, list, add, remove }) {
  * /v1/vessels/{vesselId}/skippers[/{skipperId}]`).
  *
  * Thin handlers only: Joi validates the transport shape, every route requires the trusted
- * `authentication-service` strategy, and all business orchestration lives in
+ * Entra strategy with a vessel-scoped capability (`protectedRoute`), and all business orchestration lives in
  * `src/catch-recording/controller/vessel-favourites.js` and `vessel-skippers.js`.
  */
 export const vesselProfiles = [
@@ -224,7 +233,10 @@ export const vesselProfiles = [
     method: 'GET',
     path: '/v1/vessels/{vesselId}/skippers',
     options: {
-      auth: AUTH_STRATEGY,
+      ...protectedRoute({
+        capability: Capability.READ,
+        vesselIdParam: 'vesselId'
+      }),
       validate: { params: vesselIdParamsSchema }
     },
     handler: buildListHandler(listSkippers)
@@ -233,7 +245,10 @@ export const vesselProfiles = [
     method: 'POST',
     path: '/v1/vessels/{vesselId}/skippers',
     options: {
-      auth: AUTH_STRATEGY,
+      ...protectedRoute({
+        capability: Capability.UPDATE,
+        vesselIdParam: 'vesselId'
+      }),
       validate: {
         params: vesselIdParamsSchema,
         headers: idempotencyHeadersSchema,
@@ -246,7 +261,10 @@ export const vesselProfiles = [
     method: 'DELETE',
     path: '/v1/vessels/{vesselId}/skippers/{skipperId}',
     options: {
-      auth: AUTH_STRATEGY,
+      ...protectedRoute({
+        capability: Capability.UPDATE,
+        vesselIdParam: 'vesselId'
+      }),
       validate: { params: skipperIdParamsSchema }
     },
     handler: removeSkipperHandler

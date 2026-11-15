@@ -43,7 +43,7 @@ function buildListingSummary(catchRecord) {
 /**
  * @param {Object} input
  * @param {import('mongodb').Db} input.db
- * @param {{ userId: string, scopes: ReadonlyArray<string> }} input.authenticationContext
+ * @param {{ userId: string }} input.authenticationContext
  * @param {number} input.limit the already Joi-validated, bounded page size
  * @param {string} [input.status] the already Joi-validated, optional persisted-status filter
  * @returns {Promise<Readonly<{ items: ReadonlyArray<object>, limit: number, count: number }>>} the

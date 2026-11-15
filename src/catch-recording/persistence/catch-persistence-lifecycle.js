@@ -193,8 +193,8 @@ async function classifySubmissionMiss(collection, { id, ownerUserId }) {
  * predicate matches only canonical identity (`_id`), persisted status (`SUBMITTED`), and the caller's
  * expected version, exactly mirroring every other atomic primitive's "predicate, not an application
  * read, controls the write" guarantee, applied to a permission-gated (not ownership-gated) operation.
- * `completion-policy.js`'s `decideCompletionAccess` must already have authorised the caller before this
- * is ever invoked - this primitive enforces only the lifecycle and concurrency preconditions.
+ * The completion endpoint has been removed as deprecated and this primitive currently has no caller; it
+ * enforces only the lifecycle and concurrency preconditions, so any future caller must authorise first.
  *
  * On success: `status` becomes `COMPLETE`, trusted completion metadata is recorded, and `version`
  * increments by exactly `1`. Submission count and artifacts are untouched (not part of this `$set`).

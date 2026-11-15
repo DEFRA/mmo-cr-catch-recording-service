@@ -86,7 +86,7 @@ async function startIdempotencyClaim({
 /**
  * @param {Object} input
  * @param {import('mongodb').Db} input.db
- * @param {{ userId: string, scopes: ReadonlyArray<string> }} input.authenticationContext
+ * @param {{ userId: string }} input.authenticationContext
  * @param {string} input.catchRecordId
  * @param {number} input.expectedVersion
  * @param {string|undefined} input.idempotencyKey optional `Idempotency-Key` header value

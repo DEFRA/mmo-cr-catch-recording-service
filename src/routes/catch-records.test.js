@@ -2,21 +2,13 @@
 import Hapi from '@hapi/hapi'
 
 import { catchRecords } from './catch-records.js'
-import { authenticationPlugin } from '#/catch-recording/controller/authentication-plugin.js'
+import { registerStubAuthorization } from '#/authorization/authorization-test-fixtures.js'
 import { referenceDataPlugin } from '#/catch-recording/controller/reference-data-plugin.js'
 import { errorMapping } from '#/plugins/error-mapping.js'
 import { requestTracing } from '#/plugins/request-tracing.js'
 import { failAction } from '#/common/helpers/fail-action.js'
 
 vi.mock('@defra/cdp-auditing', () => ({ audit: vi.fn() }))
-
-const AUTH_OPTIONS = {
-  baseUrl: 'https://authentication-service.example',
-  timeoutMs: 1000,
-  retryCount: 0,
-  retryDelayMs: 0,
-  tracingHeader: 'x-cdp-request-id'
-}
 
 const REFERENCE_DATA_OPTIONS = {
   baseUrl: 'https://reference-data-service.example',
@@ -255,7 +247,7 @@ async function createTestServer() {
 
   await server.register(requestTracing)
   await server.register(errorMapping)
-  await server.register({ plugin: authenticationPlugin, options: AUTH_OPTIONS })
+  await registerStubAuthorization(server)
   await server.register({
     plugin: referenceDataPlugin,
     options: REFERENCE_DATA_OPTIONS
@@ -295,9 +287,6 @@ function validVesselBody() {
 }
 
 function mockSuccessfulAuthAndVessel() {
-  fetchMock.mockResponseOnce(
-    JSON.stringify({ actorId: 'owner-1', permissions: [] })
-  )
   fetchMock.mockResponseOnce(JSON.stringify({ items: [{ id: 'vessel-1' }] }))
   fetchMock.mockResponseOnce(JSON.stringify(validVesselBody()))
 }
@@ -323,9 +312,6 @@ describe('POST /v1/catch-records', () => {
 
   test('rejects a missing vesselId with a safe 400', async () => {
     const { server } = await createTestServer()
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'POST',
@@ -351,9 +337,6 @@ describe('POST /v1/catch-records', () => {
 
   test('rejects a vessel the caller cannot access with 403', async () => {
     const { server } = await createTestServer()
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
     fetchMock.mockResponseOnce(JSON.stringify({ items: [] }))
     fetchMock.mockResponseOnce(JSON.stringify(validVesselBody()))
 
@@ -386,9 +369,6 @@ describe('POST /v1/catch-records', () => {
 
   test('rejects a malformed client-supplied catchRecordReference with a safe 400', async () => {
     const { server } = await createTestServer()
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'POST',
@@ -440,9 +420,6 @@ describe('POST /v1/catch-records', () => {
     })
     const created = JSON.parse(createResponse.payload)
 
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
     const getResponse = await server.inject({
       method: 'GET',
       url: `/v1/catch-records/${created.id}`,
@@ -576,9 +553,6 @@ describe('DELETE /v1/catch-records/{catchRecordId}', () => {
   test('abandons an eligible draft and returns 204', async () => {
     const { server, db } = await createTestServer()
     db.collections['catch-records'].seed(eligibleDraftDocument())
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'DELETE',
@@ -592,10 +566,6 @@ describe('DELETE /v1/catch-records/{catchRecordId}', () => {
   test('is idempotent: deleting an already-abandoned draft again still returns 204', async () => {
     const { server, db } = await createTestServer()
     db.collections['catch-records'].seed(eligibleDraftDocument())
-    fetchMock.mockResponse(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
-
     const first = await server.inject({
       method: 'DELETE',
       url: '/v1/catch-records/record-1',
@@ -613,9 +583,6 @@ describe('DELETE /v1/catch-records/{catchRecordId}', () => {
 
   test('rejects a missing/malformed If-Match header with 400', async () => {
     const { server } = await createTestServer()
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'DELETE',
@@ -648,9 +615,6 @@ describe('DELETE /v1/catch-records/{catchRecordId}', () => {
         submittedBy: 'owner-1'
       })
     )
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'DELETE',
@@ -664,9 +628,6 @@ describe('DELETE /v1/catch-records/{catchRecordId}', () => {
   test('rejects a stale expected version with 409', async () => {
     const { server, db } = await createTestServer()
     db.collections['catch-records'].seed(eligibleDraftDocument({ version: 2 }))
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'DELETE',
@@ -682,9 +643,6 @@ describe('PATCH /v1/catch-records/{catchRecordId}', () => {
   test('saves the trip section and returns 200 with the standard save response', async () => {
     const { server, db } = await createTestServer()
     db.collections['catch-records'].seed(eligibleDraftDocument())
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
     fetchMock.mockResponseOnce(
       JSON.stringify({
         id: 'port-1',
@@ -729,9 +687,6 @@ describe('PATCH /v1/catch-records/{catchRecordId}', () => {
   test('saves the pairFishing section and returns 200', async () => {
     const { server, db } = await createTestServer()
     db.collections['catch-records'].seed(eligibleDraftDocument())
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'PATCH',
@@ -759,9 +714,6 @@ describe('PATCH /v1/catch-records/{catchRecordId}', () => {
         ]
       })
     )
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'PATCH',
@@ -784,9 +736,6 @@ describe('PATCH /v1/catch-records/{catchRecordId}', () => {
     db.collections['catch-records'].seed(
       eligibleDraftDocument({ status: 'SUBMITTED', numberOfSubmissions: 1 })
     )
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'PATCH',
@@ -800,9 +749,6 @@ describe('PATCH /v1/catch-records/{catchRecordId}', () => {
 
   test('rejects an unsupported section name with 400', async () => {
     const { server } = await createTestServer()
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'PATCH',
@@ -816,9 +762,6 @@ describe('PATCH /v1/catch-records/{catchRecordId}', () => {
 
   test('rejects a malformed (non-array) gears payload with 400', async () => {
     const { server } = await createTestServer()
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'PATCH',
@@ -845,9 +788,6 @@ describe('PATCH /v1/catch-records/{catchRecordId}', () => {
 
   test('rejects a missing/malformed If-Match header with 400', async () => {
     const { server } = await createTestServer()
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'PATCH',
@@ -861,9 +801,6 @@ describe('PATCH /v1/catch-records/{catchRecordId}', () => {
 
   test('rejects a missing catch record with 404', async () => {
     const { server } = await createTestServer()
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'PATCH',
@@ -878,9 +815,6 @@ describe('PATCH /v1/catch-records/{catchRecordId}', () => {
   test('rejects a stale expected version with 409', async () => {
     const { server, db } = await createTestServer()
     db.collections['catch-records'].seed(eligibleDraftDocument({ version: 2 }))
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'PATCH',
@@ -895,9 +829,6 @@ describe('PATCH /v1/catch-records/{catchRecordId}', () => {
   test('rejects an invalid section payload with a safe 422', async () => {
     const { server, db } = await createTestServer()
     db.collections['catch-records'].seed(eligibleDraftDocument())
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'PATCH',
@@ -915,9 +846,6 @@ describe('PATCH /v1/catch-records/{catchRecordId}', () => {
   test('saves a new gear occurrence, generating a stable associationId', async () => {
     const { server, db } = await createTestServer()
     db.collections['catch-records'].seed(eligibleDraftDocument())
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
     fetchMock.mockResponseOnce(JSON.stringify(gearCollectionResponse()))
 
     const response = await server.inject({
@@ -957,9 +885,6 @@ describe('PATCH /v1/catch-records/{catchRecordId}', () => {
     const { server, db } = await createTestServer()
     db.collections['catch-records'].seed(
       eligibleDraftDocument({ gears: [existingGear()] })
-    )
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
     )
     fetchMock.mockResponseOnce(JSON.stringify(gearCollectionResponse()))
 
@@ -1006,9 +931,6 @@ describe('PATCH /v1/catch-records/{catchRecordId}', () => {
         ]
       })
     )
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
     fetchMock.mockResponseOnce(JSON.stringify(gearCollectionResponse()))
 
     const response = await server.inject({
@@ -1038,9 +960,6 @@ describe('PATCH /v1/catch-records/{catchRecordId}', () => {
     const { server, db } = await createTestServer()
     db.collections['catch-records'].seed(
       eligibleDraftDocument({ gears: [existingGear()] })
-    )
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
     )
     fetchMock.mockResponseOnce(JSON.stringify(gearCollectionResponse()))
     fetchMock.mockResponseOnce(JSON.stringify(statisticalAreaFeatureResponse()))
@@ -1075,9 +994,6 @@ describe('PATCH /v1/catch-records/{catchRecordId}', () => {
   test('Step 24: rejects an invalid/not-found statistical area with a safe 422', async () => {
     const { server, db } = await createTestServer()
     db.collections['catch-records'].seed(eligibleDraftDocument())
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
     fetchMock.mockResponseOnce(JSON.stringify(gearCollectionResponse()))
     fetchMock.mockResponseOnce(JSON.stringify({ status: 404 }), {
       status: 404
@@ -1102,9 +1018,6 @@ describe('PATCH /v1/catch-records/{catchRecordId}', () => {
       eligibleDraftDocument({
         gears: [existingGear({ speciesCaught: [] })]
       })
-    )
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
     )
     fetchMock.mockResponseOnce(JSON.stringify(gearCollectionResponse()))
     fetchMock.mockResponseOnce(JSON.stringify(speciesResponse()))
@@ -1152,9 +1065,6 @@ describe('PATCH /v1/catch-records/{catchRecordId}', () => {
     db.collections['catch-records'].seed(
       eligibleDraftDocument({ gears: [existingGear({ speciesCaught: [] })] })
     )
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
     fetchMock.mockResponseOnce(JSON.stringify(gearCollectionResponse()))
     fetchMock.mockResponseOnce(JSON.stringify({ status: 404 }), {
       status: 404
@@ -1183,9 +1093,6 @@ describe('PATCH /v1/catch-records/{catchRecordId}', () => {
   test('rejects a gear that cannot be resolved with a safe 422', async () => {
     const { server, db } = await createTestServer()
     db.collections['catch-records'].seed(eligibleDraftDocument())
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
     fetchMock.mockResponseOnce(JSON.stringify(gearNotFoundResponse()))
 
     const response = await server.inject({
@@ -1201,9 +1108,6 @@ describe('PATCH /v1/catch-records/{catchRecordId}', () => {
   test('rejects a stale expected version for gears with 409', async () => {
     const { server, db } = await createTestServer()
     db.collections['catch-records'].seed(eligibleDraftDocument({ version: 2 }))
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'PATCH',
@@ -1217,9 +1121,6 @@ describe('PATCH /v1/catch-records/{catchRecordId}', () => {
 
   test('rejects a missing catch record for gears with 404', async () => {
     const { server } = await createTestServer()
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'PATCH',
@@ -1234,9 +1135,6 @@ describe('PATCH /v1/catch-records/{catchRecordId}', () => {
   test('leaves unrelated fields unchanged when saving gears', async () => {
     const { server, db } = await createTestServer()
     db.collections['catch-records'].seed(eligibleDraftDocument())
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
     fetchMock.mockResponseOnce(JSON.stringify(gearCollectionResponse()))
 
     await server.inject({
@@ -1292,9 +1190,6 @@ describe('GET /v1/catch-records', () => {
     db.collections['catch-records'].seed(
       listingDocument({ _id: 'record-2', ownerUserId: 'owner-2' })
     )
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'GET',
@@ -1319,9 +1214,6 @@ describe('GET /v1/catch-records', () => {
 
   test('returns a successful empty list when the owner has no records', async () => {
     const { server } = await createTestServer()
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'GET',
@@ -1343,9 +1235,6 @@ describe('GET /v1/catch-records', () => {
     db.collections['catch-records'].seed(
       listingDocument({ _id: 'record-2', status: 'SUBMITTED' })
     )
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'GET',
@@ -1360,9 +1249,6 @@ describe('GET /v1/catch-records', () => {
 
   test('rejects an unsupported status value with a safe 400', async () => {
     const { server } = await createTestServer()
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'GET',
@@ -1375,9 +1261,6 @@ describe('GET /v1/catch-records', () => {
 
   test('rejects an unknown query parameter with a safe 400', async () => {
     const { server } = await createTestServer()
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'GET',
@@ -1390,9 +1273,6 @@ describe('GET /v1/catch-records', () => {
 
   test('rejects a limit above the approved maximum with a safe 400', async () => {
     const { server } = await createTestServer()
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'GET',
@@ -1419,9 +1299,6 @@ describe('GET /v1/catch-records/{catchRecordId}', () => {
   test('returns the complete canonical record plus derived progress facts', async () => {
     const { server, db } = await createTestServer()
     db.collections['catch-records'].seed(listingDocument())
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'GET',
@@ -1446,9 +1323,6 @@ describe('GET /v1/catch-records/{catchRecordId}', () => {
 
   test('returns a safe 404 for a missing record', async () => {
     const { server } = await createTestServer()
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'GET',
@@ -1463,9 +1337,6 @@ describe('GET /v1/catch-records/{catchRecordId}', () => {
     const { server, db } = await createTestServer()
     db.collections['catch-records'].seed(
       listingDocument({ ownerUserId: 'owner-2' })
-    )
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
     )
 
     const response = await server.inject({
@@ -1491,9 +1362,6 @@ describe('GET /v1/catch-records/{catchRecordId}', () => {
   test('performs no mutation (no findOneAndUpdate/findOneAndDelete call)', async () => {
     const { server, db } = await createTestServer()
     db.collections['catch-records'].seed(listingDocument())
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     await server.inject({
       method: 'GET',
@@ -1562,9 +1430,6 @@ describe('PUT /v1/catch-records/{catchRecordId}', () => {
   test('replaces the record and returns the standard save response', async () => {
     const { server, db } = await createTestServer()
     db.collections['catch-records'].seed(replacementDraftDocument())
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
     fetchMock.mockResponseOnce(JSON.stringify({ items: [{ id: 'vessel-1' }] }))
     fetchMock.mockResponseOnce(JSON.stringify(validVesselBody()))
     fetchMock.mockResponseOnce(
@@ -1603,9 +1468,6 @@ describe('PUT /v1/catch-records/{catchRecordId}', () => {
 
   test('rejects an unknown root payload property with a safe 400', async () => {
     const { server } = await createTestServer()
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'PUT',
@@ -1619,9 +1481,6 @@ describe('PUT /v1/catch-records/{catchRecordId}', () => {
 
   test('rejects a missing required section with a safe 400', async () => {
     const { server } = await createTestServer()
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
     const { gears: _omitted, ...incompletePayload } = validReplacementPayload()
 
     const response = await server.inject({
@@ -1636,9 +1495,6 @@ describe('PUT /v1/catch-records/{catchRecordId}', () => {
 
   test('rejects a missing if-match header with a safe 400', async () => {
     const { server } = await createTestServer()
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'PUT',
@@ -1654,9 +1510,6 @@ describe('PUT /v1/catch-records/{catchRecordId}', () => {
     const { server, db } = await createTestServer()
     db.collections['catch-records'].seed(
       replacementDraftDocument({ version: 2 })
-    )
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
     )
     fetchMock.mockResponseOnce(JSON.stringify({ items: [{ id: 'vessel-1' }] }))
     fetchMock.mockResponseOnce(JSON.stringify(validVesselBody()))
@@ -1699,9 +1552,6 @@ describe('PUT /v1/catch-records/{catchRecordId}', () => {
     db.collections['catch-records'].seed(
       replacementDraftDocument({ status: 'SUBMITTED', numberOfSubmissions: 1 })
     )
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'PUT',
@@ -1711,14 +1561,11 @@ describe('PUT /v1/catch-records/{catchRecordId}', () => {
     })
 
     expect(response.statusCode).toBe(409)
-    expect(fetchMock.mock.calls).toHaveLength(1)
+    expect(fetchMock.mock.calls).toHaveLength(0)
   })
 
   test('returns a safe 404 for a missing record', async () => {
     const { server } = await createTestServer()
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'PUT',
@@ -1745,9 +1592,6 @@ describe('PUT /v1/catch-records/{catchRecordId}', () => {
 
   test('rejects an oversized payload with a safe error', async () => {
     const { server } = await createTestServer()
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const oversizedSpeciesNotLanded = Array.from({ length: 20000 }, () => ({
       id: 'COD',
@@ -1793,9 +1637,6 @@ describe('GET /v1/catch-records/{catchRecordId}/history', () => {
         metadata: { section: 'trip' }
       })
     )
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'GET',
@@ -1814,9 +1655,6 @@ describe('GET /v1/catch-records/{catchRecordId}/history', () => {
   test('returns a successful empty history for a record with no events', async () => {
     const { server, db } = await createTestServer()
     db.collections['catch-records'].seed(listingDocument())
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'GET',
@@ -1830,9 +1668,6 @@ describe('GET /v1/catch-records/{catchRecordId}/history', () => {
 
   test('returns a safe 404 for a missing record', async () => {
     const { server } = await createTestServer()
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'GET',
@@ -1848,9 +1683,6 @@ describe('GET /v1/catch-records/{catchRecordId}/history', () => {
     db.collections['catch-records'].seed(
       listingDocument({ ownerUserId: 'owner-2' })
     )
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'GET',
@@ -1863,9 +1695,6 @@ describe('GET /v1/catch-records/{catchRecordId}/history', () => {
 
   test('rejects a limit above the approved maximum with a safe 400', async () => {
     const { server } = await createTestServer()
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'GET',
@@ -1878,9 +1707,6 @@ describe('GET /v1/catch-records/{catchRecordId}/history', () => {
 
   test('rejects an unknown query parameter with a safe 400', async () => {
     const { server } = await createTestServer()
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'GET',
@@ -1905,9 +1731,6 @@ describe('GET /v1/catch-records/{catchRecordId}/history', () => {
   test('performs no mutation and creates no additional history event', async () => {
     const { server, db } = await createTestServer()
     db.collections['catch-records'].seed(listingDocument())
-    fetchMock.mockResponseOnce(
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     await server.inject({
       method: 'GET',
@@ -1987,10 +1810,6 @@ function mockSubmissionReferenceData() {
   // every endpoint this validation pass calls is required instead of one `mockResponseIf` per endpoint.
   fetchMock.mockResponse((req) => {
     const { url } = req
-
-    if (url.includes('/validate')) {
-      return JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    }
 
     if (
       url.includes('/reference-data/vessels/vessel-1') &&
@@ -2078,16 +1897,10 @@ describe('POST /v1/catch-records/{catchRecordId}/submission', () => {
 
   test('rejects an unauthenticated request with 401', async () => {
     const { server } = await createTestServer()
-    fetchMock.mockResponseIf(
-      (req) => req.url.includes('/validate'),
-      JSON.stringify({}),
-      { status: 401 }
-    )
-
     const response = await server.inject({
       method: 'POST',
       url: '/v1/catch-records/record-1/submission',
-      headers: { authorization: 'Bearer token-1', 'if-match': '1' }
+      headers: { authorization: 'Bearer rejected-token', 'if-match': '1' }
     })
 
     expect(response.statusCode).toBe(401)
@@ -2095,10 +1908,6 @@ describe('POST /v1/catch-records/{catchRecordId}/submission', () => {
 
   test('returns 404 for a catch record that does not exist', async () => {
     const { server } = await createTestServer()
-    fetchMock.mockResponseIf(
-      (req) => req.url.includes('/validate'),
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'POST',
@@ -2122,10 +1931,6 @@ describe('POST /v1/catch-records/{catchRecordId}/submission', () => {
           { submissionNumber: 1, type: 'PDF_RECEIPT' }
         ]
       })
-    )
-    fetchMock.mockResponseIf(
-      (req) => req.url.includes('/validate'),
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
     )
 
     const response = await server.inject({
@@ -2238,10 +2043,6 @@ describe('GET /v1/catch-records/{catchRecordId}/submissions', () => {
   test('lists the committed submission', async () => {
     const { server, db } = await createTestServer()
     db.collections['catch-records'].seed(submittedDraftDocument())
-    fetchMock.mockResponseIf(
-      (req) => req.url.includes('/validate'),
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'GET',
@@ -2275,10 +2076,6 @@ describe('GET /v1/catch-records/{catchRecordId}/submissions', () => {
 
   test('returns 404 for a catch record that does not exist', async () => {
     const { server } = await createTestServer()
-    fetchMock.mockResponseIf(
-      (req) => req.url.includes('/validate'),
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'GET',
@@ -2292,15 +2089,11 @@ describe('GET /v1/catch-records/{catchRecordId}/submissions', () => {
   test('returns 404 (not 200 with another owner data) for a horizontal access attempt', async () => {
     const { server, db } = await createTestServer()
     db.collections['catch-records'].seed(submittedDraftDocument())
-    fetchMock.mockResponseIf(
-      (req) => req.url.includes('/validate'),
-      JSON.stringify({ actorId: 'a-different-owner', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'GET',
       url: '/v1/catch-records/record-1/submissions',
-      headers: { authorization: 'Bearer token-1' }
+      headers: { authorization: 'Bearer other-owner-token' }
     })
 
     expect(response.statusCode).toBe(404)
@@ -2323,10 +2116,6 @@ describe('GET /v1/catch-records/{catchRecordId}/submissions/{submissionNumber}/{
     const { server, db, catchArtifactStore } = await createTestServer()
     db.collections['catch-records'].seed(submittedDraftDocument())
     seedArtifactBytes(catchArtifactStore)
-    fetchMock.mockResponseIf(
-      (req) => req.url.includes('/validate'),
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'GET',
@@ -2347,10 +2136,6 @@ describe('GET /v1/catch-records/{catchRecordId}/submissions/{submissionNumber}/{
     const { server, db, catchArtifactStore } = await createTestServer()
     db.collections['catch-records'].seed(submittedDraftDocument())
     seedArtifactBytes(catchArtifactStore)
-    fetchMock.mockResponseIf(
-      (req) => req.url.includes('/validate'),
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'GET',
@@ -2366,10 +2151,6 @@ describe('GET /v1/catch-records/{catchRecordId}/submissions/{submissionNumber}/{
   test('rejects an unsupported artifact type with a safe 400', async () => {
     const { server, db } = await createTestServer()
     db.collections['catch-records'].seed(submittedDraftDocument())
-    fetchMock.mockResponseIf(
-      (req) => req.url.includes('/validate'),
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'GET',
@@ -2383,10 +2164,6 @@ describe('GET /v1/catch-records/{catchRecordId}/submissions/{submissionNumber}/{
   test('rejects a zero/negative/fractional submission number with a safe 400', async () => {
     const { server, db } = await createTestServer()
     db.collections['catch-records'].seed(submittedDraftDocument())
-    fetchMock.mockResponseIf(
-      (req) => req.url.includes('/validate'),
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'GET',
@@ -2401,10 +2178,6 @@ describe('GET /v1/catch-records/{catchRecordId}/submissions/{submissionNumber}/{
     const { server, db, catchArtifactStore } = await createTestServer()
     db.collections['catch-records'].seed(submittedDraftDocument())
     seedArtifactBytes(catchArtifactStore)
-    fetchMock.mockResponseIf(
-      (req) => req.url.includes('/validate'),
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'GET',
@@ -2420,15 +2193,11 @@ describe('GET /v1/catch-records/{catchRecordId}/submissions/{submissionNumber}/{
     const { server, db, catchArtifactStore } = await createTestServer()
     db.collections['catch-records'].seed(submittedDraftDocument())
     seedArtifactBytes(catchArtifactStore)
-    fetchMock.mockResponseIf(
-      (req) => req.url.includes('/validate'),
-      JSON.stringify({ actorId: 'a-different-owner', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'GET',
       url: '/v1/catch-records/record-1/submissions/1/json',
-      headers: { authorization: 'Bearer token-1' }
+      headers: { authorization: 'Bearer other-owner-token' }
     })
 
     expect(response.statusCode).toBe(404)
@@ -2436,113 +2205,10 @@ describe('GET /v1/catch-records/{catchRecordId}/submissions/{submissionNumber}/{
   })
 })
 
-describe('POST /v1/catch-records/{catchRecordId}/completion', () => {
-  test('completes an eligible submitted record for a caller with the exact completion scope', async () => {
-    const { server, db } = await createTestServer()
-    db.collections['catch-records'].seed(submittedDraftDocument())
-    fetchMock.mockResponseIf(
-      (req) => req.url.includes('/validate'),
-      JSON.stringify({
-        actorId: 'admin-1',
-        permissions: ['catch-recording.complete']
-      })
-    )
-
-    const response = await server.inject({
-      method: 'POST',
-      url: '/v1/catch-records/record-1/completion',
-      headers: { authorization: 'Bearer token-1', 'if-match': '1' }
-    })
-
-    expect(response.statusCode).toBe(200)
-    const body = JSON.parse(response.payload)
-    expect(body.status).toBe('COMPLETE')
-    expect(body.completedBy).toBe('admin-1')
-
-    const historyInsert =
-      db.collections['catch-record-history'].insertOne.mock.calls[0][0]
-    expect(historyInsert.eventType).toBe('COMPLETED')
-    expect(historyInsert.ownerUserId).toBe('owner-1')
-    expect(historyInsert.actorUserId).toBe('admin-1')
-  })
-
-  test('rejects an authenticated caller lacking the completion scope with 403', async () => {
-    const { server, db } = await createTestServer()
-    db.collections['catch-records'].seed(submittedDraftDocument())
-    fetchMock.mockResponseIf(
-      (req) => req.url.includes('/validate'),
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
-
-    const response = await server.inject({
-      method: 'POST',
-      url: '/v1/catch-records/record-1/completion',
-      headers: { authorization: 'Bearer token-1', 'if-match': '1' }
-    })
-
-    expect(response.statusCode).toBe(403)
-  })
-
-  test('returns 409 for a DRAFT record (not eligible for completion)', async () => {
-    const { server, db } = await createTestServer()
-    db.collections['catch-records'].seed(completeEligibleDraftDocument())
-    fetchMock.mockResponseIf(
-      (req) => req.url.includes('/validate'),
-      JSON.stringify({
-        actorId: 'admin-1',
-        permissions: ['catch-recording.complete']
-      })
-    )
-
-    const response = await server.inject({
-      method: 'POST',
-      url: '/v1/catch-records/record-1/completion',
-      headers: { authorization: 'Bearer token-1', 'if-match': '1' }
-    })
-
-    expect(response.statusCode).toBe(409)
-  })
-
-  test('returns 404 for a catch record that does not exist', async () => {
-    const { server } = await createTestServer()
-    fetchMock.mockResponseIf(
-      (req) => req.url.includes('/validate'),
-      JSON.stringify({
-        actorId: 'admin-1',
-        permissions: ['catch-recording.complete']
-      })
-    )
-
-    const response = await server.inject({
-      method: 'POST',
-      url: '/v1/catch-records/does-not-exist/completion',
-      headers: { authorization: 'Bearer token-1', 'if-match': '1' }
-    })
-
-    expect(response.statusCode).toBe(404)
-  })
-
-  test('rejects a missing/malformed If-Match header with 400', async () => {
-    const { server } = await createTestServer()
-
-    const response = await server.inject({
-      method: 'POST',
-      url: '/v1/catch-records/record-1/completion',
-      headers: { authorization: 'Bearer token-1' }
-    })
-
-    expect(response.statusCode).toBe(400)
-  })
-})
-
 describe('POST /v1/catch-records/{catchRecordId}/edit-start', () => {
   test('returns an eligible submitted record to DRAFT with hasUnsubmittedChanges = true', async () => {
     const { server, db } = await createTestServer()
     db.collections['catch-records'].seed(submittedDraftDocument())
-    fetchMock.mockResponseIf(
-      (req) => req.url.includes('/validate'),
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'POST',
@@ -2564,10 +2230,6 @@ describe('POST /v1/catch-records/{catchRecordId}/edit-start', () => {
   test('returns 409 for an already-DRAFT record', async () => {
     const { server, db } = await createTestServer()
     db.collections['catch-records'].seed(completeEligibleDraftDocument())
-    fetchMock.mockResponseIf(
-      (req) => req.url.includes('/validate'),
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'POST',
@@ -2580,10 +2242,6 @@ describe('POST /v1/catch-records/{catchRecordId}/edit-start', () => {
 
   test('returns 404 for a catch record that does not exist', async () => {
     const { server } = await createTestServer()
-    fetchMock.mockResponseIf(
-      (req) => req.url.includes('/validate'),
-      JSON.stringify({ actorId: 'owner-1', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'POST',
@@ -2597,15 +2255,11 @@ describe('POST /v1/catch-records/{catchRecordId}/edit-start', () => {
   test('returns 404 for a horizontal edit-start attempt by a different owner', async () => {
     const { server, db } = await createTestServer()
     db.collections['catch-records'].seed(submittedDraftDocument())
-    fetchMock.mockResponseIf(
-      (req) => req.url.includes('/validate'),
-      JSON.stringify({ actorId: 'a-different-owner', permissions: [] })
-    )
 
     const response = await server.inject({
       method: 'POST',
       url: '/v1/catch-records/record-1/edit-start',
-      headers: { authorization: 'Bearer token-1', 'if-match': '1' }
+      headers: { authorization: 'Bearer other-owner-token', 'if-match': '1' }
     })
 
     expect(response.statusCode).toBe(404)

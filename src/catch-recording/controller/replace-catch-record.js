@@ -259,7 +259,7 @@ async function resolveReplacementSections({
  * @param {Object} input
  * @param {import('mongodb').Db} input.db
  * @param {object} input.referenceDataClient Step 15 Reference Data Service client
- * @param {{ userId: string, scopes: ReadonlyArray<string> }} input.authenticationContext
+ * @param {{ userId: string }} input.authenticationContext
  * @param {string} input.catchRecordId
  * @param {number} input.expectedVersion
  * @param {unknown} input.payload the client-supplied complete-replacement payload (already Joi-validated

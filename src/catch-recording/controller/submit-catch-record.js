@@ -442,7 +442,7 @@ async function finaliseSubmission({
  * @param {import('mongodb').Db} input.db
  * @param {object} input.referenceDataClient the Step 15 Reference Data Service client
  * @param {object} input.catchArtifactStore the Step 33 `CatchArtifact` storage adapter
- * @param {{ userId: string, scopes: ReadonlyArray<string> }} input.authenticationContext
+ * @param {{ userId: string }} input.authenticationContext
  * @param {string} input.catchRecordId
  * @param {number} input.expectedVersion
  * @param {string|undefined} input.idempotencyKey optional `Idempotency-Key` header value

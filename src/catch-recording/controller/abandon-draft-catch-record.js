@@ -22,7 +22,7 @@ import {
  *
  * @param {Object} input
  * @param {import('mongodb').Db} input.db
- * @param {{ userId: string, scopes: ReadonlyArray<string> }} input.authenticationContext
+ * @param {{ userId: string }} input.authenticationContext
  * @param {string} input.catchRecordId
  * @param {number} input.expectedVersion
  * @returns {Promise<void>}

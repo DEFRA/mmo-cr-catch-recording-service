@@ -11,7 +11,7 @@
 POST /v1/catch-records/{catchRecordId}/submission
 ```
 
-No request payload. Requires the trusted `authentication-service` strategy, an `If-Match` header (the
+No request payload. Requires the Entra authentication strategy, the `catch-record.submit` capability, an `If-Match` header (the
 existing expected-version contract, unchanged), and accepts an optional `Idempotency-Key` header
 (applied only when supplied — the same optional-header precedent as Step 18's draft creation).
 

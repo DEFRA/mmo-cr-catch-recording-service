@@ -14,7 +14,7 @@ docker compose logs -f mmo-cr-catch-recording-service
 
 The API is available at `http://localhost:3001` by default.
 
-Authenticated `/v1/...` calls require a configured Authentication Service. Operations that validate vessels, ports, gears, species, or related reference values also require a reachable Reference Data Service.
+Authenticated `/v1/...` calls require a valid Entra access token (fixed static tokens are not supported), the Entra settings and a reachable User Profile Service holding the caller's roles. Operations that validate vessels, ports, gears, species, or related reference values also require a reachable Reference Data Service.
 
 ## 2. Set reusable variables
 
@@ -22,7 +22,7 @@ Run this block once in the same shell used for the commands below:
 
 ```bash
 export BASE_URL="http://localhost:3001"
-export TOKEN="replace-with-a-token-accepted-by-authentication-service"
+export TOKEN="replace-with-an-entra-access-token-for-the-configured-audience"
 
 export VESSEL_ID="0fe4d4aa-22f8-449e-89c9-b7052bae8667"
 export CATCH_RECORD_ID="5f9c6586-3bf0-4fbb-95d8-ef2cf9c1d9af"
@@ -423,18 +423,7 @@ curl -fSsL \
 file "catch-record-$CATCH_RECORD_ID-submission-$SUBMISSION_NUMBER.pdf"
 ```
 
-### 4.14 Complete the Catch Record
-
-This is a restricted-permission transition from `SUBMITTED` to `COMPLETE`.
-
-```bash
-curl -i -sS -X POST "$BASE_URL/v1/catch-records/$CATCH_RECORD_ID/completion" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "If-Match: $VERSION" \
-  -H "Idempotency-Key: complete-catch-record-001"
-```
-
-### 4.15 Start an amendment
+### 4.14 Start an amendment
 
 This transitions a `SUBMITTED` or `COMPLETE` record back to `DRAFT` for in-place editing.
 
@@ -676,7 +665,9 @@ curl -i -sS \
 ## 11. Common troubleshooting
 
 - **Connection refused on port 3001:** run `docker compose ps` and inspect the application logs.
-- **Every `/v1/...` call returns 401:** `AUTHENTICATION_SERVICE_URL` is probably unset or unreachable, or the token is not accepted.
+- **Every `/v1/...` call returns 401:** the `ENTRA_*` settings are probably unset, or the token is not a valid Entra access token for the configured issuer and audience.
+- **Every `/v1/...` call returns 403:** the user has no role granting the operation's capability for that vessel in the User Profile Service.
+- **Calls return 503 before any business logic:** the User Profile Service roles or role definitions cannot be obtained.
 - **Draft creation or favourites return 503:** check `REFERENCE_DATA_SERVICE_URL`, `REFERENCE_DATA_SERVICE_TOKEN`, and network reachability.
 - **A write fails after an earlier successful write:** refresh the record and update `VERSION`; each successful mutation can increment it.
 - **Submission artifact errors:** confirm the local S3-compatible emulator is healthy.

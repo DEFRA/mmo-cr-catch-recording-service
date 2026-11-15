@@ -52,8 +52,9 @@ npm install
 
 Copy [`.env.example`](./.env.example) to `.env` and adjust values for your local environment (every
 value has a safe default in `src/config.js` if left unset — see
-[`docs/api-endpoints.md`](./docs/api-endpoints.md) for which routes need the Authentication Service and
-Reference Data Service URLs configured to function):
+[`docs/api-endpoints.md`](./docs/api-endpoints.md) for which routes need the Entra and User Profile Service settings and the
+Reference Data Service URLs configured to function; see
+[`docs/entra-authentication.md`](./docs/entra-authentication.md)):
 
 ```bash
 cp .env.example .env

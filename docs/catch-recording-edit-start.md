@@ -15,7 +15,7 @@ No request payload — no amendment-reason field exists anywhere in the canonica
 policies (`buildEditStartFacts` takes no `reason` parameter), so none is invented. Owner-scoped, exactly
 like submission (amendment authorisation is ownership-gated — confirmed in
 `docs/catch-recording-authorisation.md`, unlike completion's permission-gated model). Requires the
-trusted `authentication-service` strategy, an `If-Match` header, and accepts an optional
+Entra authentication strategy, the `catch-record.amend` capability, an `If-Match` header, and accepts an optional
 `Idempotency-Key`.
 
 ## Eligible source states

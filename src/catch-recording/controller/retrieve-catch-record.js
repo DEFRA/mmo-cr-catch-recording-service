@@ -76,7 +76,7 @@ function deriveSubmissionEligible(catchRecord, sectionCompletion) {
 /**
  * @param {Object} input
  * @param {import('mongodb').Db} input.db
- * @param {{ userId: string, scopes: ReadonlyArray<string> }} input.authenticationContext
+ * @param {{ userId: string }} input.authenticationContext
  * @param {string} input.catchRecordId
  * @returns {Promise<Readonly<object>>} the complete canonical Catch Record plus derived progress facts
  * @throws {ApplicationError} `RESOURCE_NOT_FOUND` when the record does not exist for this owner

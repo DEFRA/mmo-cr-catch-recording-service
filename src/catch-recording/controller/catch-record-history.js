@@ -57,7 +57,7 @@ function buildPublicHistoryEvent(event) {
 /**
  * @param {Object} input
  * @param {import('mongodb').Db} input.db
- * @param {{ userId: string, scopes: ReadonlyArray<string> }} input.authenticationContext
+ * @param {{ userId: string }} input.authenticationContext
  * @param {string} input.catchRecordId
  * @param {number} input.limit the already Joi-validated, bounded event-page size
  * @returns {Promise<Readonly<object>>} the approved combined lifecycle-and-history response

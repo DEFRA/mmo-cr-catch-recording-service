@@ -204,8 +204,7 @@ function hasMatchingSkipper(document, normalisedName) {
  * purely a profile-creation race unrelated to any name collision — resolved by retrying the identical
  * update exactly once more, now that the profile document exists and the same filter can correctly
  * evaluate its `$ne` condition instead of attempting a second insert. `MAX_SKIPPER_ADD_ATTEMPTS` bounds
- * this to a single retry — mirroring the bounded-recursion pattern already used by
- * `authentication-client.js`'s `validateWithRetry`.
+ * this to a single retry.
  */
 async function attemptAddSkipper(
   collection,

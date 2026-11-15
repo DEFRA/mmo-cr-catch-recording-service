@@ -6,8 +6,7 @@ const FRAMEWORK_NEUTRAL_FILES = [
   'ownership-policy.js',
   'resource-access-policy.js',
   'vessel-access-policy.js',
-  'vessel-profile-policy.js',
-  'completion-policy.js'
+  'vessel-profile-policy.js'
 ]
 
 describe('#architecture-boundary (security)', () => {
