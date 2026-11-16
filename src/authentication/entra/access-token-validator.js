@@ -127,10 +127,12 @@ function keyFailureReason(keyResult) {
 }
 
 // TEMPORARY local-debug: friendly label per failure reason, for step-by-step log readability; remove before merging.
+const HEADER_EXTRACTION_STEP = 'header-extraction'
 const FAILURE_STEP_LABELS = {
-  [BearerTokenFailure.MISSING_AUTHORIZATION_HEADER]: 'header-extraction',
-  [BearerTokenFailure.MALFORMED_AUTHORIZATION_HEADER]: 'header-extraction',
-  [BearerTokenFailure.UNSUPPORTED_AUTHENTICATION_SCHEME]: 'header-extraction',
+  [BearerTokenFailure.MISSING_AUTHORIZATION_HEADER]: HEADER_EXTRACTION_STEP,
+  [BearerTokenFailure.MALFORMED_AUTHORIZATION_HEADER]: HEADER_EXTRACTION_STEP,
+  [BearerTokenFailure.UNSUPPORTED_AUTHENTICATION_SCHEME]:
+    HEADER_EXTRACTION_STEP,
   [AccessTokenFailure.MALFORMED_TOKEN]: 'token-malformed',
   [AccessTokenFailure.DISALLOWED_ALGORITHM]: 'header-algorithm-check',
   [AccessTokenFailure.MISSING_KEY_ID]: 'header-kid-check',
