@@ -174,10 +174,10 @@ class SigningKeyProvider {
       : settled
   }
 
-  #logLookup(outcome, reason) {
+  #logLookup(outcome, reason, level = WARN) {
     safeLog(
       this.#logger,
-      WARN,
+      level,
       { event: LOOKUP_EVENT, outcome, reason },
       LOOKUP_EVENT
     )
@@ -206,6 +206,8 @@ class SigningKeyProvider {
 
     const cachedKey = this.#findFreshKey(keyId)
     if (cachedKey) {
+      // TEMPORARY local-debug log: makes the cache-vs-refresh path visible; remove before merging.
+      this.#logLookup('cache-hit', 'fresh-snapshot', 'debug')
       return { ok: true, keyId, key: cachedKey }
     }
 
@@ -225,6 +227,8 @@ class SigningKeyProvider {
 
     const key = this.#snapshot?.getKey(keyId) ?? null
     if (key) {
+      // TEMPORARY local-debug log: makes the cache-vs-refresh path visible; remove before merging.
+      this.#logLookup('resolved', 'after-refresh', 'debug')
       return { ok: true, keyId, key }
     }
 
