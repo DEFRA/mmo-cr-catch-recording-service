@@ -1,5 +1,6 @@
 import { decodeProtectedHeader, errors, jwtVerify } from 'jose'
 
+import { safeLog } from '#/common/helpers/logging/safe-log.js'
 import { BearerTokenFailure, extractBearerToken } from './bearer-token.js'
 import { SigningKeyFailure } from './signing-key-failure.js'
 
@@ -125,13 +126,48 @@ function keyFailureReason(keyResult) {
   return AccessTokenFailure.SIGNING_KEY_UNAVAILABLE
 }
 
-function readProtectedHeader(token, allowedAlgorithms) {
+// TEMPORARY local-debug: friendly label per failure reason, for step-by-step log readability; remove before merging.
+const FAILURE_STEP_LABELS = {
+  [BearerTokenFailure.MISSING_AUTHORIZATION_HEADER]: 'header-extraction',
+  [BearerTokenFailure.MALFORMED_AUTHORIZATION_HEADER]: 'header-extraction',
+  [BearerTokenFailure.UNSUPPORTED_AUTHENTICATION_SCHEME]: 'header-extraction',
+  [AccessTokenFailure.MALFORMED_TOKEN]: 'token-malformed',
+  [AccessTokenFailure.DISALLOWED_ALGORITHM]: 'header-algorithm-check',
+  [AccessTokenFailure.MISSING_KEY_ID]: 'header-kid-check',
+  [AccessTokenFailure.SIGNING_KEY_NOT_FOUND]: 'signing-key-lookup',
+  [AccessTokenFailure.SIGNING_KEY_UNAVAILABLE]: 'signing-key-dependency',
+  [AccessTokenFailure.INVALID_SIGNATURE]: 'signature-check',
+  [AccessTokenFailure.MISSING_ISSUER]: 'issuer-check',
+  [AccessTokenFailure.INVALID_ISSUER]: 'issuer-check',
+  [AccessTokenFailure.MISSING_AUDIENCE]: 'audience-scope-check',
+  [AccessTokenFailure.INVALID_AUDIENCE]: 'audience-scope-check',
+  [AccessTokenFailure.EXPIRED_TOKEN]: 'expiry-check',
+  [AccessTokenFailure.TOKEN_NOT_YET_VALID]: 'not-before-check',
+  [AccessTokenFailure.MALFORMED_TIME_CLAIM]: 'time-claim-check',
+  [AccessTokenFailure.MISSING_REQUIRED_CLAIM]: 'required-claim-check',
+  [AccessTokenFailure.AUTHENTICATION_NOT_CONFIGURED]: 'entra-not-configured',
+  [AccessTokenFailure.UNEXPECTED_VALIDATION_FAILURE]: 'unexpected-failure'
+}
+
+function describeFailureStep(reason) {
+  return FAILURE_STEP_LABELS[reason] ?? 'unexpected-failure'
+}
+
+function readProtectedHeader(token, allowedAlgorithms, logger) {
   let header
   try {
     header = decodeProtectedHeader(token)
   } catch {
     return { failureReason: AccessTokenFailure.MALFORMED_TOKEN }
   }
+
+  // TEMPORARY local-debug log: header only (alg/kid), never claims/payload; remove before merging.
+  safeLog(
+    logger,
+    'debug',
+    { event: 'auth.jwt-header', header },
+    'auth.jwt-header'
+  )
 
   if (
     typeof header.alg !== 'string' ||
@@ -168,7 +204,8 @@ export function createAccessTokenValidator({
   audience,
   allowedAlgorithms,
   clockToleranceSeconds = DEFAULT_CLOCK_TOLERANCE_SECONDS,
-  now = () => new Date()
+  now = () => new Date(),
+  logger
 }) {
   /**
    * @param {unknown} authorizationHeader the raw `Authorization` header value
@@ -177,6 +214,27 @@ export function createAccessTokenValidator({
    *   | { ok: false, reason: string, source: string }>>}
    */
   async function validate(authorizationHeader, { signal } = {}) {
+    const result = await performValidation(authorizationHeader, { signal })
+
+    // TEMPORARY local-debug log: exact (non-coarsened) step/reason, never the token/claims; remove before merging.
+    safeLog(
+      logger,
+      'debug',
+      {
+        event: 'auth.token-validation-detail',
+        outcome: result.ok ? 'success' : 'failure',
+        step: result.ok
+          ? 'all-checks-passed'
+          : describeFailureStep(result.reason),
+        reason: result.ok ? undefined : result.reason
+      },
+      'auth.token-validation-detail'
+    )
+
+    return result
+  }
+
+  async function performValidation(authorizationHeader, { signal } = {}) {
     const extracted = extractBearerToken(authorizationHeader)
     if (!extracted.ok) {
       return failure(extracted.reason)
@@ -185,7 +243,8 @@ export function createAccessTokenValidator({
     const { token } = extracted
     const { failureReason, keyId } = readProtectedHeader(
       token,
-      allowedAlgorithms
+      allowedAlgorithms,
+      logger
     )
     if (failureReason) {
       return failure(failureReason)
