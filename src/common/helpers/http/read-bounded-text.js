@@ -19,7 +19,7 @@ export async function readBoundedText(response, maxBytes) {
     throw new ResponseBodyTooLargeError()
   }
 
-  if (!response.body?.getReader) {
+  if (!response.body?.[Symbol.asyncIterator]) {
     const fullText = await response.text()
     if (Buffer.byteLength(fullText) > maxBytes) {
       throw new ResponseBodyTooLargeError()
@@ -31,7 +31,7 @@ export async function readBoundedText(response, maxBytes) {
   let received = 0
   let text = ''
 
-  // Leaving the loop early (the throw below) cancels the underlying stream.
+  // Leaving the iterator early (including by throwing) cancels the underlying stream
   for await (const value of response.body) {
     received += value.byteLength
     if (received > maxBytes) {
