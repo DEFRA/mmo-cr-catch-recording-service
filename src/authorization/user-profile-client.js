@@ -191,33 +191,39 @@ class UserProfileClient {
     )
   }
 
-  async #attemptWithRetries(operation, { url, correlationId, signal }) {
-    let attemptNumber = 0
-    let result = await this.#attempt({ url, correlationId, signal })
+  async #attemptWithRetries(
+    operation,
+    { url, correlationId, signal },
+    attemptNumber = 0
+  ) {
+    const result = await this.#attempt({ url, correlationId, signal })
 
-    while (this.#shouldRetry(result, attemptNumber)) {
-      safeLog(
-        this.#logger,
-        WARN,
-        {
-          event: 'user-profile.retry',
-          operation,
-          outcome: result.outcome,
-          status: result.status,
-          attempt: attemptNumber + 1
-        },
-        'user-profile.retry'
-      )
-      await this.#sleepFn(this.#retryDelayMs, signal)
-      if (signal?.aborted) {
-        return failure(UserProfileOutcome.CANCELLED)
-      }
-
-      attemptNumber += 1
-      result = await this.#attempt({ url, correlationId, signal })
+    if (!this.#shouldRetry(result, attemptNumber)) {
+      return result
     }
 
-    return result
+    safeLog(
+      this.#logger,
+      WARN,
+      {
+        event: 'user-profile.retry',
+        operation,
+        outcome: result.outcome,
+        status: result.status,
+        attempt: attemptNumber + 1
+      },
+      'user-profile.retry'
+    )
+    await this.#sleepFn(this.#retryDelayMs, signal)
+    if (signal?.aborted) {
+      return failure(UserProfileOutcome.CANCELLED)
+    }
+
+    return this.#attemptWithRetries(
+      operation,
+      { url, correlationId, signal },
+      attemptNumber + 1
+    )
   }
 
   async #request(operation, { url, correlationId, signal }) {
