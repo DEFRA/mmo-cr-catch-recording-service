@@ -47,7 +47,7 @@ export function toCdpFields(obj) {
 
   if (typeof event === 'string') {
     out['event.action'] = event
-  } else if (event !== undefined) {
+  } else {
     out.event = event
   }
   if (Object.keys(custom).length > 0) {
