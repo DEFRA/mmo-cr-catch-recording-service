@@ -27,19 +27,14 @@ export async function readBoundedText(response, maxBytes) {
     return fullText
   }
 
-  const reader = response.body.getReader()
   const decoder = new TextDecoder()
   let received = 0
   let text = ''
 
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) {
-      break
-    }
+  // Leaving the loop early (the throw below) cancels the underlying stream.
+  for await (const value of response.body) {
     received += value.byteLength
     if (received > maxBytes) {
-      await reader.cancel()
       throw new ResponseBodyTooLargeError()
     }
     text += decoder.decode(value, { stream: true })
