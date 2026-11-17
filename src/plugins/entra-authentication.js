@@ -23,9 +23,7 @@ export const entraAuthentication = {
         issuer: entra.issuer,
         audience: entra.audience,
         allowedAlgorithms: entra.allowedAlgorithms,
-        now,
-        // TEMPORARY local-debug: raw logger, bypassing securityTelemetry's field allow-list; remove before merging.
-        logger: server.logger
+        now
       })
 
       server.auth.scheme(ENTRA_AUTH_STRATEGY, entraAuthenticationScheme)
