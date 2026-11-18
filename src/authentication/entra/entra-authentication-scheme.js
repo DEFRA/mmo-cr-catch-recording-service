@@ -1,3 +1,4 @@
+import { safeLog } from '#/common/helpers/logging/safe-log.js'
 import { getTraceId } from '@defra/hapi-tracing'
 
 import { tokenFailureCategory } from '#/authorization/security-telemetry.js'
@@ -30,22 +31,24 @@ export function entraAuthenticationScheme(_server, options) {
     now = () => performance.now()
   } = options
 
-  const report = (startedAt, outcome, reason, source) => {
+  const report = (startedAt, outcome, reason, source, detail = reason) => {
     try {
+      const durationMs = now() - startedAt
+      const message = `Authentication ${outcome}: ${detail} (${Math.round(durationMs)}ms)`
       const fields = {
         event: TOKEN_VALIDATION_EVENT,
         outcome,
         reason,
         correlationId: getTraceId(),
-        durationMs: now() - startedAt
+        durationMs
       }
       if (outcome === 'success') {
-        telemetry?.debug(fields, TOKEN_VALIDATION_EVENT)
+        telemetry?.debug(fields, message)
       } else if (source === 'dependency' || source === 'internal') {
-        telemetry?.warn(fields, TOKEN_VALIDATION_EVENT)
+        telemetry?.warn(fields, message)
       } else {
         // Expected credential failures are not errors and are logged below warning to limit flooding
-        telemetry?.info(fields, TOKEN_VALIDATION_EVENT)
+        telemetry?.info(fields, message)
       }
     } catch {
       // telemetry is never allowed to alter the authentication outcome
@@ -53,13 +56,25 @@ export function entraAuthenticationScheme(_server, options) {
   }
 
   const reject = (h, startedAt, reason, source) => {
-    report(startedAt, 'failure', tokenFailureCategory(reason), source)
+    report(
+      startedAt,
+      'failure',
+      tokenFailureCategory(reason),
+      source,
+      reason.toLowerCase().replaceAll('_', '-')
+    )
     return h.unauthenticated(entraAuthenticationError(reason))
   }
 
   return {
     authenticate: async (request, h) => {
       const startedAt = now()
+      safeLog(
+        telemetry,
+        'debug',
+        { event: TOKEN_VALIDATION_EVENT, correlationId: getTraceId() },
+        'Authentication flow started'
+      )
       const validation = await validator.validate(request.headers.authorization)
       if (!validation.ok) {
         return reject(h, startedAt, validation.reason, validation.source)

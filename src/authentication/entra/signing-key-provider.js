@@ -104,7 +104,7 @@ class SigningKeyProvider {
           keyCount: this.#snapshot.keyIds.length,
           durationMs: loadedAt - startedAt
         },
-        REFRESH_EVENT
+        `Signing keys refreshed: ${this.#snapshot.keyIds.length} keys (${loadedAt - startedAt}ms)`
       )
 
       return { ok: true }
@@ -127,7 +127,7 @@ class SigningKeyProvider {
         reason,
         durationMs: this.#now() - startedAt
       },
-      REFRESH_EVENT
+      `Signing keys refresh failed: ${reason}`
     )
 
     return { ok: false, reason }
@@ -179,7 +179,7 @@ class SigningKeyProvider {
       this.#logger,
       WARN,
       { event: LOOKUP_EVENT, outcome, reason },
-      LOOKUP_EVENT
+      `Signing key lookup ${outcome}: ${reason}`
     )
   }
 
@@ -206,10 +206,22 @@ class SigningKeyProvider {
 
     const cachedKey = this.#findFreshKey(keyId)
     if (cachedKey) {
+      safeLog(
+        this.#logger,
+        'debug',
+        { event: LOOKUP_EVENT, outcome: 'success', source: 'cache' },
+        'Signing key found in valid cache'
+      )
       return { ok: true, keyId, key: cachedKey }
     }
 
     // Absent, due for refresh, or unknown kid: at most one refresh for this resolution, one retry.
+    safeLog(
+      this.#logger,
+      'debug',
+      { event: REFRESH_EVENT, outcome: 'started' },
+      'Signing key not in valid cache, refresh required'
+    )
     const outcome = await this.#refreshIfAllowed(signal)
     if (outcome.status === 'cancelled') {
       return lookupFailure(SigningKeyFailure.REQUEST_CANCELLED, true)
