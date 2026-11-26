@@ -21,8 +21,40 @@ const BODY_FONT_SIZE = 10
 const TABLE_FONT_SIZE = 8
 const RULE_COLOUR = '#000000'
 const TITLE_RULE_COLOUR = '#4f81bd'
-const FIELD_COLUMN_WIDTHS = [125, 160, 110, 100]
-const CATCH_COLUMN_WIDTHS = [0.07, 0.24, 0.17, 0.2, 0.2, 0.12]
+const LABEL_WIDTH = 125
+const VALUE_WIDTH = 160
+const SECOND_LABEL_WIDTH = 110
+const SECOND_VALUE_WIDTH = 100
+const FIELD_COLUMN_WIDTHS = [
+  LABEL_WIDTH,
+  VALUE_WIDTH,
+  SECOND_LABEL_WIDTH,
+  SECOND_VALUE_WIDTH
+]
+const AREA_RATIO = 0.07
+const GEAR_RATIO = 0.24
+const SPECIES_RATIO = 0.17
+const WEIGHT_RATIO = 0.2
+const RETAINED_RATIO = 0.12
+const CATCH_COLUMN_WIDTHS = [
+  AREA_RATIO,
+  GEAR_RATIO,
+  SPECIES_RATIO,
+  WEIGHT_RATIO,
+  WEIGHT_RATIO,
+  RETAINED_RATIO
+]
+const RULE_LINE_WIDTH = 0.75
+const SECTION_GAP_LINES = 1.2
+const SEPARATOR_GAP_LINES = 0.3
+const HEADING_GAP_LINES = 0.8
+const ROW_TOP_OFFSET = 3
+const CELL_PADDING_X = 3
+const CELL_PADDING_Y = 5
+const CELL_PADDING_TOTAL = CELL_PADDING_X * 2
+const FONT_REGULAR = 'Helvetica'
+const FONT_BOLD = 'Helvetica-Bold'
+const NOT_PROVIDED = 'Not provided'
 const CATCH_COLUMNS = [
   'Area',
   'Gear',
@@ -43,14 +75,18 @@ function collectPdfBuffer(doc) {
 
 function formatValue(value) {
   if (value === null || value === undefined || value === '') {
-    return 'Not provided'
+    return NOT_PROVIDED
   }
   return String(value)
 }
 
 function formatDate(value) {
   const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value ?? ''))
-  return match ? `${match[3]}/${match[2]}/${match[1]}` : formatValue(value)
+  if (!match) {
+    return formatValue(value)
+  }
+  const [, year, month, day] = match
+  return `${day}/${month}/${year}`
 }
 
 function formatDateTime(value) {
@@ -64,7 +100,7 @@ function formatDateTime(value) {
 
 function formatWeight(value, unit = '') {
   return value === null || value === undefined
-    ? 'Not provided'
+    ? NOT_PROVIDED
     : `${value}${unit}`
 }
 
@@ -84,7 +120,7 @@ function writeRule(doc, colour = RULE_COLOUR) {
   doc
     .moveTo(PAGE_MARGIN, y)
     .lineTo(doc.page.width - PAGE_MARGIN, y)
-    .lineWidth(0.75)
+    .lineWidth(RULE_LINE_WIDTH)
     .strokeColor(colour)
     .stroke()
   doc.strokeColor(RULE_COLOUR)
@@ -94,16 +130,16 @@ function writeRule(doc, colour = RULE_COLOUR) {
 
 function writeHeading(doc, text, { separator = false } = {}) {
   if (separator) {
-    doc.moveDown(1.2)
+    doc.moveDown(SECTION_GAP_LINES)
     writeRule(doc)
-    doc.moveDown(0.3)
+    doc.moveDown(SEPARATOR_GAP_LINES)
   } else {
-    doc.moveDown(0.8)
+    doc.moveDown(HEADING_GAP_LINES)
   }
-  doc.font('Helvetica-Bold').fontSize(SECTION_FONT_SIZE).text(text)
+  doc.font(FONT_BOLD).fontSize(SECTION_FONT_SIZE).text(text)
   doc.y += 1
   writeRule(doc)
-  doc.font('Helvetica').fontSize(BODY_FONT_SIZE)
+  doc.font(FONT_REGULAR).fontSize(BODY_FONT_SIZE)
 }
 
 /** Writes label/value pairs two to a row, as laid out in the approved certificate mock. */
@@ -114,33 +150,31 @@ function writeFieldRows(doc, rows) {
       { text: formatValue(value), bold: false, column: i * 2 + 1 }
     ])
     const measured = cells.map((cell) => {
-      doc
-        .font(cell.bold ? 'Helvetica-Bold' : 'Helvetica')
-        .fontSize(BODY_FONT_SIZE)
+      doc.font(cell.bold ? FONT_BOLD : FONT_REGULAR).fontSize(BODY_FONT_SIZE)
       return doc.heightOfString(cell.text, {
         width: FIELD_COLUMN_WIDTHS[cell.column]
       })
     })
-    const top = doc.y + 3
+    const top = doc.y + ROW_TOP_OFFSET
     const height = Math.max(...measured)
     if (top + height > doc.page.height - PAGE_MARGIN) {
       doc.addPage()
-      doc.y = PAGE_MARGIN - 3
+      doc.y = PAGE_MARGIN - ROW_TOP_OFFSET
     }
-    const rowTop = doc.y + 3
+    const rowTop = doc.y + ROW_TOP_OFFSET
     cells.forEach((cell) => {
       const x =
         PAGE_MARGIN +
         4 +
         FIELD_COLUMN_WIDTHS.slice(0, cell.column).reduce((a, b) => a + b, 0)
       doc
-        .font(cell.bold ? 'Helvetica-Bold' : 'Helvetica')
+        .font(cell.bold ? FONT_BOLD : FONT_REGULAR)
         .text(cell.text, x, rowTop, { width: FIELD_COLUMN_WIDTHS[cell.column] })
     })
     doc.x = PAGE_MARGIN
     doc.y = rowTop + height
   })
-  doc.font('Helvetica')
+  doc.font(FONT_REGULAR)
 }
 
 function findCharacteristic(gearAssociation, pattern) {
@@ -178,11 +212,11 @@ function describeGear(gearAssociation) {
 function writeTableRow(doc, cells, { bold = false } = {}) {
   const tableWidth = doc.page.width - PAGE_MARGIN * 2
   const widths = CATCH_COLUMN_WIDTHS.map((ratio) => ratio * tableWidth)
-  doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(TABLE_FONT_SIZE)
+  doc.font(bold ? FONT_BOLD : FONT_REGULAR).fontSize(TABLE_FONT_SIZE)
   const height =
     Math.max(
       ...cells.map((cell, i) =>
-        doc.heightOfString(cell, { width: widths[i] - 6 })
+        doc.heightOfString(cell, { width: widths[i] - CELL_PADDING_TOTAL })
       )
     ) + 10
   if (doc.y + height > doc.page.height - PAGE_MARGIN) {
@@ -191,13 +225,16 @@ function writeTableRow(doc, cells, { bold = false } = {}) {
   const top = doc.y
   let x = PAGE_MARGIN
   cells.forEach((cell, i) => {
-    doc.lineWidth(0.75).rect(x, top, widths[i], height).stroke()
-    doc.text(cell, x + 3, top + 5, { width: widths[i] - 6, align: 'center' })
+    doc.lineWidth(RULE_LINE_WIDTH).rect(x, top, widths[i], height).stroke()
+    doc.text(cell, x + CELL_PADDING_X, top + CELL_PADDING_Y, {
+      width: widths[i] - CELL_PADDING_TOTAL,
+      align: 'center'
+    })
     x += widths[i]
   })
   doc.x = PAGE_MARGIN
   doc.y = top + height
-  doc.font('Helvetica').fontSize(BODY_FONT_SIZE)
+  doc.font(FONT_REGULAR).fontSize(BODY_FONT_SIZE)
 }
 
 function writeCatchTable(doc, snapshot, maxRenderedItems) {
@@ -212,7 +249,7 @@ function writeCatchTable(doc, snapshot, maxRenderedItems) {
       ? gearAssociation.speciesCaught.slice(0, maxRenderedItems)
       : []
     if (species.length === 0) {
-      writeTableRow(doc, [area, gear, 'Not provided', '', '', ''])
+      writeTableRow(doc, [area, gear, NOT_PROVIDED, '', '', ''])
     }
     species.forEach((entry, index) => {
       writeTableRow(doc, [
@@ -261,6 +298,61 @@ function writeAmendmentDetails(doc, snapshot) {
   writeFieldRows(doc, rows)
 }
 
+function writeGeneralDetails(doc, snapshot, category) {
+  const amended = (Number(snapshot?.numberOfSubmissions) || 0) > 1
+  writeHeading(doc, 'General Details')
+  writeFieldRows(doc, [
+    [
+      ['Trip Reference', snapshot?.catchRecordReference],
+      ['Record Status', amended ? 'Amended' : 'Original']
+    ],
+    [
+      ['PLN', snapshot?.vessel?.externalMarkSnapshot],
+      ['Vessel Name', snapshot?.vessel?.nameSnapshot]
+    ],
+    [
+      ['RSS Number', snapshot?.vessel?.rssSnapshot],
+      ['Vessel Category', category]
+    ]
+  ])
+}
+
+function writeTripDetails(doc, snapshot) {
+  writeHeading(doc, 'Trip Details', { separator: true })
+  const tripRows = [
+    [
+      ['Departure Port', snapshot?.trip?.departurePort?.nameSnapshot],
+      ['Departure Date', formatDate(snapshot?.trip?.dateStarted)]
+    ],
+    [
+      ['Return Port', snapshot?.trip?.returnPort?.nameSnapshot],
+      ['Return Date', formatDate(snapshot?.trip?.dateEnded)]
+    ]
+  ]
+  if (snapshot?.pairFishing?.enabled) {
+    tripRows.push([
+      ['Pair Vessel', snapshot.pairFishing.pairVessel],
+      ['Pair Skipper', snapshot.pairFishing.pairSkipperName]
+    ])
+  }
+  writeFieldRows(doc, tripRows)
+}
+
+function writeSubmissionDetails(doc, snapshot) {
+  writeHeading(doc, 'Submission Details', { separator: true })
+  writeFieldRows(doc, [
+    [
+      ['Submission Date/Time', formatDateTime(snapshot?.submittedAt)],
+      ['Receipt Date/Time', formatDateTime(snapshot?.submittedAt)]
+    ],
+    [
+      ['Submission Source', snapshot?.submissionSource],
+      ['Submitter Name', snapshot?.submitter?.name]
+    ],
+    [['Submitter Address', snapshot?.submitter?.address]]
+  ])
+}
+
 /**
  * Generates the PDF receipt for one immutable submission snapshot.
  *
@@ -296,62 +388,16 @@ export async function generateSubmissionReceiptPdf(
     )
   doc.y += 2
   writeRule(doc, TITLE_RULE_COLOUR)
-  doc.font('Helvetica').fontSize(BODY_FONT_SIZE)
+  doc.font(FONT_REGULAR).fontSize(BODY_FONT_SIZE)
 
-  const amended = (Number(snapshot?.numberOfSubmissions) || 0) > 1
-
-  writeHeading(doc, 'General Details')
-  writeFieldRows(doc, [
-    [
-      ['Trip Reference', snapshot?.catchRecordReference],
-      ['Record Status', amended ? 'Amended' : 'Original']
-    ],
-    [
-      ['PLN', snapshot?.vessel?.externalMarkSnapshot],
-      ['Vessel Name', snapshot?.vessel?.nameSnapshot]
-    ],
-    [
-      ['RSS Number', snapshot?.vessel?.rssSnapshot],
-      ['Vessel Category', category]
-    ]
-  ])
-
-  writeHeading(doc, 'Trip Details', { separator: true })
-  const tripRows = [
-    [
-      ['Departure Port', snapshot?.trip?.departurePort?.nameSnapshot],
-      ['Departure Date', formatDate(snapshot?.trip?.dateStarted)]
-    ],
-    [
-      ['Return Port', snapshot?.trip?.returnPort?.nameSnapshot],
-      ['Return Date', formatDate(snapshot?.trip?.dateEnded)]
-    ]
-  ]
-  if (snapshot?.pairFishing?.enabled) {
-    tripRows.push([
-      ['Pair Vessel', snapshot.pairFishing.pairVessel],
-      ['Pair Skipper', snapshot.pairFishing.pairSkipperName]
-    ])
-  }
-  writeFieldRows(doc, tripRows)
+  writeGeneralDetails(doc, snapshot, category)
+  writeTripDetails(doc, snapshot)
 
   writeHeading(doc, 'Catch Details')
   writeCatchTable(doc, snapshot, maxRenderedItems)
   writeSpeciesNotLanded(doc, snapshot, maxRenderedItems)
 
-  writeHeading(doc, 'Submission Details', { separator: true })
-  writeFieldRows(doc, [
-    [
-      ['Submission Date/Time', formatDateTime(snapshot?.submittedAt)],
-      ['Receipt Date/Time', formatDateTime(snapshot?.submittedAt)]
-    ],
-    [
-      ['Submission Source', snapshot?.submissionSource],
-      ['Submitter Name', snapshot?.submitter?.name]
-    ],
-    [['Submitter Address', snapshot?.submitter?.address]]
-  ])
-
+  writeSubmissionDetails(doc, snapshot)
   writeAmendmentDetails(doc, snapshot)
 
   doc.end()
