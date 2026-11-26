@@ -83,11 +83,17 @@ env vars via `compose/aws.env`; an IAM task role in deployed CDP environments).
 ## PDF receipt content
 
 Rendered from the immutable snapshot only (never mutable database state, never a Reference Data Service
-call): submission reference/number/status/timestamp/actor, schema version, vessel, trip dates and ports,
-pair-fishing detail (only when enabled), every gear (characteristics, statistical area, species caught
-with weights), and species not landed. A pragmatic, configurable rendering-safety bound
-(`maxPdfRenderedItems`) limits how many gear/species entries are rendered — approved as a safety control,
-never a completeness rule.
+call), in the "Record of your catch" certificate layout: General Details (trip reference, record status,
+PLN, vessel name, RSS, vessel category), Trip Details (ports, dates, pair fishing only when enabled),
+Catch Details (a table of area, gear with mesh size/dredges/shots, species and weights), Submission
+Details and Amendment Details (original vs amended, current version, amended date/time and user).
+
+Derived values: **vessel category** is derived from the snapshotted overall length (`Under 10m` below 10
+metres, otherwise `10m and over`); **receipt date/time** equals `submittedAt`; a record is **amended**
+when `numberOfSubmissions` is greater than 1. Fields with no source yet — submission source, submitter
+name/address, retained weight and the amending user's name (the snapshot holds only the user ID) — render
+as `Not provided`. A pragmatic, configurable rendering-safety bound (`maxPdfRenderedItems`) limits how
+many gear/species entries are rendered — approved as a safety control, never a completeness rule.
 
 ## PDF accessibility (known limitation)
 
